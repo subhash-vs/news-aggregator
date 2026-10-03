@@ -1,0 +1,24 @@
+import { NextResponse } from "next/server";
+import { getArticlesForPage } from "@/lib/articles";
+import { getEnabledPages } from "@/lib/config";
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const page = searchParams.get("page");
+  const validPages = new Set(getEnabledPages().map((p) => p.id));
+
+  if (!page || !validPages.has(page)) {
+    return NextResponse.json(
+      { error: "Invalid or missing page query param" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const data = await getArticlesForPage(page);
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("[api/articles] Failed:", error);
+    return NextResponse.json({ error: "Failed to load articles" }, { status: 500 });
+  }
+}

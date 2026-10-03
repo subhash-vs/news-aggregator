@@ -1,26 +1,294 @@
 @import "tailwindcss";
 
-:root {
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ========== Design: Broadsheet (default) ========== */
+:root,
+[data-theme="broadsheet"] {
+  --background: oklch(0.985 0.004 90);
+  --foreground: oklch(0.16 0.006 60);
+  --card: oklch(0.995 0.003 90);
+  --primary: oklch(0.16 0.006 60);
+  --primary-foreground: oklch(0.985 0.004 90);
+  --secondary: oklch(0.95 0.006 90);
+  --muted: oklch(0.95 0.006 90);
+  --muted-foreground: oklch(0.47 0.01 70);
+  --accent: oklch(0.45 0.13 28);
+  --accent-foreground: oklch(0.985 0.004 90);
+  --destructive: oklch(0.52 0.2 27);
+  --border: oklch(0.88 0.008 80);
+  --input: oklch(0.88 0.008 80);
+  --rule: oklch(0.30 0.008 70);
+  --ring: oklch(0.45 0.13 28);
+  --radius: 0.125rem;
+  --paper-dot: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --font-display: var(--font-playfair), Georgia, "Times New Roman", serif;
+  --font-masthead: var(--font-playfair), Georgia, serif;
+  --font-serif: var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-libre), system-ui, sans-serif;
+  --texture-opacity: 1;
+  --card-gap-x: 2rem;
+  --card-gap-y: 1.5rem;
+  --headline-tracking: -0.01em;
+}
+
+.dark[data-theme="broadsheet"],
+[data-theme="broadsheet"].dark {
+  --background: oklch(0.17 0.008 70);
+  --foreground: oklch(0.94 0.006 90);
+  --card: oklch(0.20 0.008 70);
+  --primary: oklch(0.94 0.006 90);
+  --primary-foreground: oklch(0.17 0.008 70);
+  --secondary: oklch(0.24 0.008 70);
+  --muted: oklch(0.24 0.008 70);
+  --muted-foreground: oklch(0.68 0.01 80);
+  --accent: oklch(0.58 0.16 28);
+  --accent-foreground: oklch(0.98 0.004 90);
+  --destructive: oklch(0.62 0.18 27);
+  --border: oklch(0.30 0.008 70);
+  --input: oklch(0.30 0.008 70);
+  --rule: oklch(0.70 0.01 85);
+  --ring: oklch(0.58 0.16 28);
+}
+
+/* ========== Design: NYT ========== */
+[data-theme="nyt"] {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #121212;
+  --card: #ffffff;
+  --primary: #121212;
+  --primary-foreground: #ffffff;
+  --secondary: #f7f7f7;
+  --muted: #f3f3f3;
+  --muted-foreground: #5a5a5a;
+  --accent: #326891;
+  --accent-foreground: #ffffff;
+  --destructive: #b02a20;
+  --border: #e2e2e2;
+  --input: #e2e2e2;
+  --rule: #121212;
+  --ring: #326891;
+  --radius: 0;
+  --paper-dot: transparent;
+  --font-display: var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-masthead: var(--font-playfair), Georgia, serif;
+  --font-serif: var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-libre), system-ui, sans-serif;
+  --texture-opacity: 0;
+  --card-gap-x: 1.25rem;
+  --card-gap-y: 1.25rem;
+  --headline-tracking: -0.015em;
+}
+
+.dark[data-theme="nyt"],
+[data-theme="nyt"].dark {
+  --background: #121212;
+  --foreground: #ededed;
+  --card: #1a1a1a;
+  --primary: #ededed;
+  --primary-foreground: #121212;
+  --secondary: #222222;
+  --muted: #242424;
+  --muted-foreground: #a0a0a0;
+  --accent: #7eb0e0;
+  --accent-foreground: #0b1a28;
+  --destructive: #d4685c;
+  --border: #333333;
+  --input: #333333;
+  --rule: #ededed;
+  --ring: #7eb0e0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-rule: var(--rule);
+  --color-ring: var(--ring);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-paper: var(--background);
+  --color-surface: var(--card);
+  --color-ink: var(--foreground);
+
+  --font-display: var(--font-display);
+  --font-serif: var(--font-serif);
+  --font-sans: var(--font-sans);
+  --font-masthead: var(--font-masthead);
+
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* Newsprint grain only on broadsheet */
+[data-theme="broadsheet"] body {
+  background-image: radial-gradient(var(--paper-dot) 0.7px, transparent 0.7px);
+  background-size: 3px 3px;
+}
+
+[data-theme="nyt"] body {
+  background-image: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: var(--foreground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ---- Utilities ---- */
+
+.rule-thick {
+  border-top: 3px double var(--color-rule);
+}
+
+[data-theme="nyt"] .rule-thick {
+  border-top: 1px solid var(--color-rule);
+}
+
+.rule-hair {
+  border-top: 1px solid var(--color-border);
+}
+
+.section-label {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+[data-theme="nyt"] .section-label {
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.kicker {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  color: var(--color-accent);
+}
+
+.meta-line {
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--color-muted-foreground);
+}
+
+[data-theme="nyt"] .meta-line {
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: none;
+}
+
+.headline-link {
+  text-decoration: none;
+  color: var(--color-foreground);
+  transition: color 0.15s ease;
+}
+
+.headline-link:hover,
+.headline-link:focus-visible {
+  color: var(--color-accent);
+}
+
+[data-theme="nyt"] .headline-link:hover,
+[data-theme="nyt"] .headline-link:focus-visible {
+  color: #326891;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.drop-cap::first-letter {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 3.6rem;
+  line-height: 0.82;
+  float: left;
+  padding-right: 0.5rem;
+  padding-top: 0.15rem;
+  color: var(--color-foreground);
+}
+
+.newsprint-image {
+  filter: saturate(0.85) contrast(1.05);
+}
+
+[data-theme="nyt"] .newsprint-image {
+  filter: none;
+}
+
+.headline-link {
+  text-align: left;
+}
+
+.grid-cards {
+  gap-x: var(--card-gap-x);
+  gap-y: var(--card-gap-y);
+}
+
+[data-theme="nyt"] .font-display,
+[data-theme="nyt"] h1,
+[data-theme="nyt"] h2,
+[data-theme="nyt"] h3 {
+  letter-spacing: var(--headline-tracking);
+}
+
+[data-theme="nyt"] .rule-thick + * {
+  /* denser stack under rules */
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-border) 25%,
+    color-mix(in oklab, var(--color-border) 55%, var(--card)) 37%,
+    var(--color-border) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
 }
