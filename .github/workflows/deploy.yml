@@ -15,21 +15,23 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    container:
-      image: oraclelinux:9
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Node.js 22
-        run: |
-          dnf install -y xz
-          curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
-          tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
-          node --version
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
 
-      - name: Install build tools
-        run: dnf install -y gcc-c++ make python3 && dnf clean all
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         run: npm ci
@@ -37,8 +39,15 @@ jobs:
       - name: Build
         env:
           NEXT_TELEMETRY_DISABLED: 1
-          NODE_OPTIONS: --max-old-space-size=3072
         run: npx next build --webpack
+
+      - name: Recompile sqlite for Oracle Linux 9
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app oraclelinux:9 bash -c "
+            dnf install -y nodejs gcc-c++ make python3 xz &&
+            cd node_modules/better-sqlite3 &&
+            npx node-gyp rebuild --release
+          "
 
       - name: Set up SSH key
         run: |
