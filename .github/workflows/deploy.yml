@@ -15,18 +15,23 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: oraclelinux:9
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Node.js and build tools
-        run: |
-          curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
-          tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
-          dnf install -y gcc-c++ make python3
-          node --version
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         run: npm ci
@@ -36,24 +41,15 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         run: npx next build --webpack
 
-      - name: Package
-        run: |
-          tar -czf deploy.tar.gz \
-            .next \
-            node_modules \
-            package.json \
-            public \
-            .env.production 2>/dev/null || tar -czf deploy.tar.gz \
-            .next \
-            node_modules \
-            package.json \
-            public
-
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: deploy-ol9
-          path: deploy.tar.gz
+          name: build
+          path: |
+            .next
+            node_modules
+            package.json
+            public
 
   deploy:
     needs: build
@@ -62,7 +58,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: deploy-ol9
+          name: build
 
       - name: Set up SSH key
         run: |
@@ -70,19 +66,25 @@ jobs:
           echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-      - name: Deploy to VM
+      - name: Rsync to VM
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz "opc@${{ secrets.ORACLE_HOST }}:/tmp/deploy.tar.gz"
+          rsync -avz --delete \
+            --exclude 'data/' \
+            --exclude '.env.local' \
+            --exclude '.git/' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./ "opc@${{ secrets.ORACLE_HOST }}:~/news-aggregator/"
+
+      - name: Fix sqlite binary and restart
+        run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "opc@${{ secrets.ORACLE_HOST }}" "
             export PATH=/usr/local/bin:\$PATH
             if ! command -v node &> /dev/null; then
               curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
               sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
             fi
-            rm -rf ~/news-aggregator
-            mkdir -p ~/news-aggregator
-            tar -xzf /tmp/deploy.tar.gz -C ~/news-aggregator
             cd ~/news-aggregator
+            npm rebuild better-sqlite3 2>&1 | tail -3
             mkdir -p data
             echo 'GUARDIAN_API_KEY=${{ secrets.GUARDIAN_API_KEY }}' > .env.production
 
