@@ -43,19 +43,16 @@ jobs:
 
       - name: Recompile sqlite for Oracle Linux 9
         run: |
-          docker run --rm -v "$PWD:/app" -w /app oraclelinux:9 bash -c "
-            dnf install -y gcc-c++ make python3 xz &&
-            curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz &&
-            tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 &&
-            cd /app/node_modules/better-sqlite3 &&
-            rm -rf prebuilds build &&
-            sed -i "s/'-flto',//g" binding.gyp &&
-            export CXXFLAGS='-march=x86-64-v2 -O2' &&
-            export LDFLAGS='-march=x86-64-v2' &&
-            npx node-gyp rebuild --release &&
-            mkdir -p prebuilds &&
+          docker run --rm -v "$PWD:/app" -w /app node:22-bullseye bash -c '
+            apt-get update -qq && apt-get install -y -qq python3 make g++ > /dev/null 2>&1
+            cd /app/node_modules/better-sqlite3
+            rm -rf prebuilds build
+            sed -i "s/'"'"'-flto'"'"',//g" binding.gyp
+            npx node-gyp rebuild --release
+            mkdir -p prebuilds
             cp build/Release/better_sqlite3.node prebuilds/linux-x64.node
-          " && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
+            echo "Binary size: $(stat -f%z prebuilds/linux-x64.node 2>/dev/null || stat -c%s prebuilds/linux-x64.node)"
+          ' && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
 
       - name: Set up SSH key
         run: |
