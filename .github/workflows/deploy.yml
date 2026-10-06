@@ -39,7 +39,7 @@ jobs:
       - name: Build
         env:
           NEXT_TELEMETRY_DISABLED: 1
-        run: npm run build
+        run: npx next build --webpack
 
       - name: Create .env.production
         run: |
