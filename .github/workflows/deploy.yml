@@ -82,3 +82,7 @@ jobs:
             sleep 8
             sudo systemctl is-active news-aggregator
           '
+
+      - name: Update DuckDNS
+        run: |
+          curl -s "https://www.duckdns.org/update?domains=customnews&token=${{ secrets.DUCKDNS_TOKEN }}&ip=" && echo ""
