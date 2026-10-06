@@ -43,8 +43,11 @@ jobs:
 
       - name: Recompile sqlite for Oracle Linux 9
         run: |
-          docker run --rm -v "$PWD:/app" -w /app node:22-bullseye bash -c '
-            apt-get update -qq && apt-get install -y -qq python3 make g++ > /dev/null 2>&1
+          docker run --rm -v "$PWD:/app" -w /app oraclelinux:9 bash -c '
+            dnf install -y gcc-c++ make python3 xz > /dev/null 2>&1
+            curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
+            tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+            node --version
             cd /app/node_modules/better-sqlite3
             rm -rf prebuilds build
             sed -i "s/NAPI_VERSION=10/NAPI_VERSION=9/g" binding.gyp
@@ -52,7 +55,6 @@ jobs:
             npx node-gyp rebuild --release
             mkdir -p prebuilds
             cp build/Release/better_sqlite3.node prebuilds/linux-x64.node
-            echo "Binary compiled with NAPI_VERSION=9"
           ' && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
 
       - name: Set up SSH key
