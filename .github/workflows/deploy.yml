@@ -41,15 +41,14 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         run: npx next build --webpack
 
+      - name: Package
+        run: tar -czf deploy.tar.gz .next node_modules package.json public
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: build
-          path: |
-            .next
-            node_modules
-            package.json
-            public
+          path: deploy.tar.gz
 
   deploy:
     needs: build
@@ -68,16 +67,17 @@ jobs:
 
       - name: Deploy to VM
         run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -r .next node_modules package.json public "opc@${{ secrets.ORACLE_HOST }}:~/news-aggregator/"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz "opc@${{ secrets.ORACLE_HOST }}:/tmp/deploy.tar.gz"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "opc@${{ secrets.ORACLE_HOST }}" '
             export PATH=/usr/local/bin:$PATH
             if ! command -v node > /dev/null 2>&1; then
               curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
               sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
             fi
-            cd ~/news-aggregator
-            mkdir -p data
-            cd node_modules/better-sqlite3 && npx prebuild-install 2>&1 | tail -3 && cd ~/news-aggregator
+            rm -rf ~/news-aggregator
+            mkdir -p ~/news-aggregator/data
+            tar -xzf /tmp/deploy.tar.gz -C ~/news-aggregator
+            cd ~/news-aggregator/node_modules/better-sqlite3 && npx prebuild-install 2>&1 | tail -3
             printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
             sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || true
             sudo systemctl daemon-reload
