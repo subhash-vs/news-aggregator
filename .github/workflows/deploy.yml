@@ -47,11 +47,12 @@ jobs:
             apt-get update -qq && apt-get install -y -qq python3 make g++ > /dev/null 2>&1
             cd /app/node_modules/better-sqlite3
             rm -rf prebuilds build
+            sed -i "s/NAPI_VERSION=10/NAPI_VERSION=9/g" binding.gyp
             sed -i "s/'"'"'-flto'"'"',//g" binding.gyp
             npx node-gyp rebuild --release
             mkdir -p prebuilds
             cp build/Release/better_sqlite3.node prebuilds/linux-x64.node
-            echo "Binary size: $(stat -f%z prebuilds/linux-x64.node 2>/dev/null || stat -c%s prebuilds/linux-x64.node)"
+            echo "Binary compiled with NAPI_VERSION=9"
           ' && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
 
       - name: Set up SSH key
