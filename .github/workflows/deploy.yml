@@ -48,8 +48,11 @@ jobs:
             curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz &&
             tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 &&
             cd /app/node_modules/better-sqlite3 &&
-            npx node-gyp rebuild --release
-          " && ls -la node_modules/better-sqlite3/build/Release/better_sqlite3.node
+            rm -rf prebuilds build &&
+            npx node-gyp rebuild --release &&
+            mkdir -p prebuilds &&
+            cp build/Release/better_sqlite3.node prebuilds/linux-x64.node
+          " && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
 
       - name: Set up SSH key
         run: |
