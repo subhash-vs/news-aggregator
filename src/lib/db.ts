@@ -160,7 +160,7 @@ export function getArticlesByPage(page: string): Article[] {
  * Called after successful fetches; bookmarks live in a separate table.
  */
 export function pruneArticles(options?: { maxAgeDays?: number; maxPerPage?: number }): void {
-  const maxAgeDays = options?.maxAgeDays ?? 7;
+  const maxAgeDays = options?.maxAgeDays ?? 1;
   const maxPerPage = options?.maxPerPage ?? 200;
 
   db.prepare(
