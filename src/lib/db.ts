@@ -86,7 +86,7 @@ db.exec(`
 `);
 
 // Migrations for existing DBs
-const articleCols = db.prepare("PRAGMA table_info(articles)").all() as Array<{ name: string }>;
+const articleCols = db.prepare("PRAGMA table_info(articles)").all() as unknown as Array<{ name: string }>;
 if (!articleCols.some((c) => c.name === "score")) {
   db.exec("ALTER TABLE articles ADD COLUMN score INTEGER");
 }
@@ -130,7 +130,7 @@ export function getArticlesByPage(page: string): Article[] {
       `SELECT id, page, category, source, title, url, thumbnail, published_at as publishedAt, fetched_at as fetchedAt, score, summary
        FROM articles WHERE page = ? ORDER BY published_at DESC`
     )
-    .all(page) as Article[];
+    .all(page) as unknown as Article[];
   return rows;
 }
 
@@ -150,7 +150,7 @@ export function pruneArticles(options?: { maxAgeDays?: number; maxPerPage?: numb
 
   const pages = db
     .prepare("SELECT DISTINCT page FROM articles")
-    .all() as Array<{ page: string }>;
+    .all() as unknown as Array<{ page: string }>;
 
   const deleteStale = db.prepare(
     `DELETE FROM articles
