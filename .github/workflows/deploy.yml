@@ -22,15 +22,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify build output
-        run: |
-          echo "=== Checking build output ==="
-          ls -la .next/
-          echo "=== Checking standalone ==="
-          ls -la .next/standalone/ || echo "standalone NOT FOUND"
-          echo "=== Checking static ==="
-          ls -la .next/static/ || echo "static NOT FOUND"
-
       - name: Package
         run: |
           tar -czf deploy.tar.gz \
@@ -77,42 +68,14 @@ jobs:
             mkdir -p ~/app
             tar -xzf deploy.tar.gz -C ~/app
             cd ~/app/.next/standalone
-
-            # Copy static files
             cp -r ~/app/.next/static .next/static
             cp -r ~/app/public public
-
-            # Create data directory
             mkdir -p data
 
-            # Set environment and start
-            export GUARDIAN_API_KEY="${{ secrets.GUARDIAN_API_KEY }}"
-            export NODE_ENV=production
-            export PORT=3000
-            export HOSTNAME=0.0.0.0
-
+            # Start app on port 80 directly (no Nginx needed)
             pm2 stop news 2>/dev/null || true
             pm2 delete news 2>/dev/null || true
-            pm2 start node --name "news" -- server.js
+            PORT=80 HOSTNAME=0.0.0.0 GUARDIAN_API_KEY="${{ secrets.GUARDIAN_API_KEY }}" pm2 start node --name "news" -- server.js
             pm2 save
 
-            # Setup Nginx if missing
-            if ! command -v nginx &> /dev/null; then
-              sudo dnf install -y nginx
-            fi
-
-            sudo tee /etc/nginx/conf.d/news.conf <<'NGINX'
-            server {
-                listen 80;
-                server_name _;
-                location / {
-                    proxy_pass http://localhost:3000;
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                }
-            }
-            NGINX
-
-            sudo systemctl enable nginx
-            sudo systemctl restart nginx
             echo "DEPLOY COMPLETE!"
