@@ -52,10 +52,30 @@ class Database {
 
 export const db = new Database(DB_PATH);
 
-db.pragma("journal_mode = WAL");
-db.pragma("busy_timeout = 5000");
+// Synchronous sleep (Atomics.wait blocks the thread)
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
-db.exec(`
+// Set busy_timeout FIRST so subsequent pragmas wait on locks
+function retryExec(sql: string, retries = 10, delayMs = 200): void {
+  for (let i = 0; i < retries; i++) {
+    try {
+      db.exec(sql);
+      return;
+    } catch (err: unknown) {
+      if (i === retries - 1) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("locked") && !msg.includes("busy")) throw err;
+      sleepSync(delayMs);
+    }
+  }
+}
+
+retryExec("PRAGMA busy_timeout = 5000");
+retryExec("PRAGMA journal_mode = WAL");
+
+retryExec(`
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
