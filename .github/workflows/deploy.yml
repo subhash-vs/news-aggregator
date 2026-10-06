@@ -44,10 +44,12 @@ jobs:
       - name: Recompile sqlite for Oracle Linux 9
         run: |
           docker run --rm -v "$PWD:/app" -w /app oraclelinux:9 bash -c "
-            dnf install -y nodejs gcc-c++ make python3 xz &&
-            cd node_modules/better-sqlite3 &&
+            dnf install -y gcc-c++ make python3 xz &&
+            curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz &&
+            tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 &&
+            cd /app/node_modules/better-sqlite3 &&
             npx node-gyp rebuild --release
-          "
+          " && ls -la node_modules/better-sqlite3/build/Release/better_sqlite3.node
 
       - name: Set up SSH key
         run: |
