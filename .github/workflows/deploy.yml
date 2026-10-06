@@ -1,0 +1,104 @@
+name: Build & Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Package standalone build
+        run: |
+          tar -czf deploy.tar.gz \
+            .next/standalone \
+            .next/static \
+            public \
+            package.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy
+          path: deploy.tar.gz
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy
+
+      - name: Deploy to Oracle Cloud
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: opc
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            # Install Node.js if missing
+            if ! command -v node &> /dev/null; then
+              curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
+              sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+            fi
+
+            # Install PM2 if missing
+            if ! command -v pm2 &> /dev/null; then
+              sudo npm install -g pm2
+            fi
+
+            # Deploy
+            mkdir -p ~/app
+            tar -xzf deploy.tar.gz -C ~/app
+            cd ~/app/.next/standalone
+
+            # Copy static files
+            cp -r ~/app/.next/static .next/static
+            cp -r ~/app/public public
+
+            # Create data directory
+            mkdir -p data
+
+            # Set environment and start
+            export GUARDIAN_API_KEY="${{ secrets.GUARDIAN_API_KEY }}"
+            export NODE_ENV=production
+            export PORT=3000
+            export HOSTNAME=0.0.0.0
+
+            pm2 stop news 2>/dev/null || true
+            pm2 delete news 2>/dev/null || true
+            pm2 start node --name "news" -- server.js
+            pm2 save
+
+            # Setup Nginx if missing
+            if ! command -v nginx &> /dev/null; then
+              sudo dnf install -y nginx
+            fi
+
+            sudo tee /etc/nginx/conf.d/news.conf <<'NGINX'
+            server {
+                listen 80;
+                server_name _;
+                location / {
+                    proxy_pass http://localhost:3000;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                }
+            }
+            NGINX
+
+            sudo systemctl enable nginx
+            sudo systemctl restart nginx
+            echo "DEPLOY COMPLETE!"
