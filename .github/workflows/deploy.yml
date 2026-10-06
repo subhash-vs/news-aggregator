@@ -15,23 +15,21 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    container:
+      image: oraclelinux:9
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
+      - name: Install Node.js 22
+        run: |
+          dnf install -y xz
+          curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
+          tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+          node --version
 
-      - name: Cache Next.js build
-        uses: actions/cache@v4
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**') }}
-          restore-keys: |
-            ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-
+      - name: Install build tools
+        run: dnf install -y gcc-c++ make python3 && dnf clean all
 
       - name: Install dependencies
         run: npm ci
@@ -39,6 +37,7 @@ jobs:
       - name: Build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          NODE_OPTIONS: --max-old-space-size=3072
         run: npx next build --webpack
 
       - name: Set up SSH key
@@ -55,10 +54,11 @@ jobs:
             --exclude '.env.local.*' \
             --exclude '.git/' \
             --exclude 'deploy/' \
+            --exclude 'docs/' \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
             ./ "opc@${{ secrets.ORACLE_HOST }}:~/news-aggregator/"
 
-      - name: Fix sqlite binary and restart
+      - name: Start service
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "opc@${{ secrets.ORACLE_HOST }}" '
             export PATH=/usr/local/bin:$PATH
@@ -66,7 +66,6 @@ jobs:
               curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
               sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
             fi
-            cd ~/news-aggregator/node_modules/better-sqlite3 && npx prebuild-install 2>&1 | tail -3
             printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
             sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || true
             sudo systemctl daemon-reload
