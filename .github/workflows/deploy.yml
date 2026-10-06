@@ -41,22 +41,6 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         run: npx next build --webpack
 
-      - name: Recompile sqlite for Oracle Linux 9
-        run: |
-          docker run --rm -v "$PWD:/app" -w /app oraclelinux:9 bash -c '
-            dnf install -y gcc-c++ make python3 xz > /dev/null 2>&1
-            curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
-            tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
-            node --version
-            cd /app/node_modules/better-sqlite3
-            rm -rf prebuilds build
-            sed -i "s/NAPI_VERSION=10/NAPI_VERSION=9/g" binding.gyp
-            sed -i "s/'"'"'-flto'"'"',//g" binding.gyp
-            npx node-gyp rebuild --release
-            mkdir -p prebuilds
-            cp build/Release/better_sqlite3.node prebuilds/linux-x64.node
-          ' && ls -la node_modules/better-sqlite3/prebuilds/linux-x64.node
-
       - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
@@ -83,7 +67,7 @@ jobs:
               curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
               sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
             fi
-            printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
+            printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
             sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || true
             sudo systemctl daemon-reload
             sudo systemctl enable news-aggregator

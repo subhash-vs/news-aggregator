@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import type { Article } from "@/types";
@@ -9,6 +9,45 @@ const DB_PATH = path.join(DATA_DIR, "news.db");
 
 if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Use Node.js built-in sqlite (node:sqlite) instead of better-sqlite3.
+// Avoids native module compilation issues across platforms.
+// Requires Node.js >= 22.5. On Node 22.x, start with --experimental-sqlite.
+
+class Database {
+  private raw: DatabaseSync;
+
+  constructor(filePath: string) {
+    this.raw = new DatabaseSync(filePath);
+  }
+
+  pragma(statement: string): void {
+    this.raw.exec(`PRAGMA ${statement}`);
+  }
+
+  exec(sql: string): void {
+    this.raw.exec(sql);
+  }
+
+  prepare(sql: string) {
+    return this.raw.prepare(sql);
+  }
+
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T {
+    const raw = this.raw;
+    return ((...args: Parameters<T>): ReturnType<T> => {
+      raw.exec("BEGIN");
+      try {
+        const result = fn(...args);
+        raw.exec("COMMIT");
+        return result as ReturnType<T>;
+      } catch (err) {
+        raw.exec("ROLLBACK");
+        throw err;
+      }
+    }) as T;
+  }
 }
 
 export const db = new Database(DB_PATH);
@@ -58,7 +97,7 @@ if (!articleCols.some((c) => c.name === "summary")) {
 export function upsertArticle(article: Article): void {
   db.prepare(`
     INSERT INTO articles (id, page, category, source, title, url, thumbnail, published_at, fetched_at, score, summary)
-    VALUES (@id, @page, @category, @source, @title, @url, @thumbnail, @publishedAt, @fetchedAt, @score, @summary)
+    VALUES ($id, $page, $category, $source, $title, $url, $thumbnail, $publishedAt, $fetchedAt, $score, $summary)
     ON CONFLICT(id) DO UPDATE SET
       page = excluded.page,
       category = excluded.category,
@@ -71,17 +110,17 @@ export function upsertArticle(article: Article): void {
       score = excluded.score,
       summary = excluded.summary
   `).run({
-    id: article.id,
-    page: article.page,
-    category: article.category ?? null,
-    source: article.source,
-    title: article.title,
-    url: article.url,
-    thumbnail: article.thumbnail ?? null,
-    publishedAt: article.publishedAt ?? null,
-    fetchedAt: article.fetchedAt ?? new Date().toISOString(),
-    score: article.score ?? null,
-    summary: article.summary ?? null,
+    $id: article.id,
+    $page: article.page,
+    $category: article.category ?? null,
+    $source: article.source,
+    $title: article.title,
+    $url: article.url,
+    $thumbnail: article.thumbnail ?? null,
+    $publishedAt: article.publishedAt ?? null,
+    $fetchedAt: article.fetchedAt ?? new Date().toISOString(),
+    $score: article.score ?? null,
+    $summary: article.summary ?? null,
   });
 }
 
