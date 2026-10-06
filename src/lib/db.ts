@@ -3,10 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Article } from "@/types";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+// DATA_DIR is intentionally configurable via environment variable for Docker deployments
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "news.db");
 
-if (!fs.existsSync(DATA_DIR)) {
+if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 

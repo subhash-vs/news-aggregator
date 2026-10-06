@@ -16,10 +16,22 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Package standalone build
+      - name: Build
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          echo "=== Checking build output ==="
+          ls -la .next/
+          echo "=== Checking standalone ==="
+          ls -la .next/standalone/ || echo "standalone NOT FOUND"
+          echo "=== Checking static ==="
+          ls -la .next/static/ || echo "static NOT FOUND"
+
+      - name: Package
         run: |
           tar -czf deploy.tar.gz \
             .next/standalone \
@@ -36,6 +48,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -60,6 +73,7 @@ jobs:
             fi
 
             # Deploy
+            rm -rf ~/app
             mkdir -p ~/app
             tar -xzf deploy.tar.gz -C ~/app
             cd ~/app/.next/standalone

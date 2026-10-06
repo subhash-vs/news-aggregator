@@ -1,0 +1,59 @@
+# Caddy configuration for news-aggregator
+# For HTTP-only (no domain), use:
+#   :80 {
+#     reverse_proxy app:3000
+#   }
+#
+# For HTTPS with a domain (example.com), uncomment and modify:
+#   example.com {
+#     reverse_proxy app:3000
+#   }
+
+# HTTP-only configuration (works with IP address)
+:80 {
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Reverse proxy to Next.js app
+    reverse_proxy app:3000 {
+        # Health check
+        health_uri /
+        health_interval 30s
+        health_timeout 10s
+    }
+
+    # Logging
+    log {
+        output stdout
+        format json
+    }
+}
+
+# HTTPS configuration (uncomment when you have a domain)
+# Make sure DNS points to your Oracle Cloud VM IP
+#
+# example.com {
+#     header {
+#         X-Content-Type-Options "nosniff"
+#         X-Frame-Options "DENY"
+#         X-XSS-Protection "1; mode=block"
+#         Referrer-Policy "strict-origin-when-cross-origin"
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#     }
+#
+#     reverse_proxy app:3000 {
+#         health_uri /
+#         health_interval 30s
+#         health_timeout 10s
+#     }
+#
+#     log {
+#         output stdout
+#         format json
+#     }
+# }
