@@ -5,77 +5,100 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
           cache: npm
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
         run: npm run build
 
-      - name: Package
+      - name: Create .env.production
         run: |
-          tar -czf deploy.tar.gz \
-            .next/standalone \
-            .next/static \
-            public \
-            package.json
+          cat > .env.production << 'EOF'
+          GUARDIAN_API_KEY=${{ secrets.GUARDIAN_API_KEY }}
+          EOF
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy
-          path: deploy.tar.gz
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: deploy
+      - name: Rsync build output to VM
+        run: |
+          rsync -avz --delete \
+            --exclude 'data/' \
+            --exclude '.env.local' \
+            --exclude '.env.local.*' \
+            --exclude '.git/' \
+            --exclude 'node_modules/.cache/' \
+            --exclude 'deploy/' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./ "opc@${{ secrets.ORACLE_HOST }}:~/news-aggregator/"
 
-      - name: Deploy to Oracle Cloud
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: opc
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          script: |
+      - name: Restart service
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "opc@${{ secrets.ORACLE_HOST }}" "
             # Install Node.js if missing
             if ! command -v node &> /dev/null; then
               curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz
               sudo tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
             fi
 
-            # Install PM2 if missing
-            if ! command -v pm2 &> /dev/null; then
-              sudo npm install -g pm2
-            fi
+            # Create systemd service
+            sudo tee /etc/systemd/system/news-aggregator.service << 'SERVICE'
+            [Unit]
+            Description=News Aggregator
+            After=network.target
 
-            # Deploy
-            rm -rf ~/app
-            mkdir -p ~/app
-            tar -xzf deploy.tar.gz -C ~/app
-            cd ~/app/.next/standalone
-            cp -r ~/app/.next/static .next/static
-            cp -r ~/app/public public
-            mkdir -p data
+            [Service]
+            Type=simple
+            User=opc
+            WorkingDirectory=/home/opc/news-aggregator
+            ExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 80
+            Environment=NODE_ENV=production
+            Environment=PORT=80
+            Environment=HOSTNAME=0.0.0.0
+            Restart=on-failure
+            RestartSec=10
+            MemoryMax=400M
 
-            # Start app on port 80 directly (no Nginx needed)
-            pm2 stop news 2>/dev/null || true
-            pm2 delete news 2>/dev/null || true
-            PORT=80 HOSTNAME=0.0.0.0 GUARDIAN_API_KEY="${{ secrets.GUARDIAN_API_KEY }}" pm2 start node --name "news" -- server.js
-            pm2 save
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
 
-            echo "DEPLOY COMPLETE!"
+            sudo systemctl daemon-reload
+            sudo systemctl enable news-aggregator
+            sudo systemctl restart news-aggregator
+            sleep 5
+            sudo systemctl is-active news-aggregator
+          "
