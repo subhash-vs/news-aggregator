@@ -49,6 +49,7 @@ jobs:
             tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 &&
             cd /app/node_modules/better-sqlite3 &&
             rm -rf prebuilds build &&
+            sed -i "s/'-flto',//g" binding.gyp &&
             export CXXFLAGS='-march=x86-64-v2 -O2' &&
             export LDFLAGS='-march=x86-64-v2' &&
             npx node-gyp rebuild --release &&
