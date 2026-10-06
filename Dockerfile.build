@@ -1,0 +1,19 @@
+FROM oraclelinux:9
+
+# Install Node.js 22
+RUN curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node.tar.xz && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
+    rm /tmp/node.tar.xz
+
+# Install build tools for better-sqlite3
+RUN dnf install -y gcc-c++ make python3 && dnf clean all
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source and build
+COPY . .
+RUN npx next build --webpack
