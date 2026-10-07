@@ -20,7 +20,7 @@ const parser = new Parser({
 
 const RSS_TIMEOUT_MS = 10_000;
 /** Hard cap on feed size — a runaway feed must never OOM the 512MB VM. */
-const MAX_FEED_BYTES = 5 * 1024 * 1024;
+const MAX_FEED_BYTES = 2 * 1024 * 1024;
 
 function firstUrlFromMedia(value: unknown): string | null {
   if (!value) return null;

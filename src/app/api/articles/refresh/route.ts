@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
-import { getArticlesForPage } from "@/lib/articles";
+import { getArticlesForPage, refreshPageInBackground } from "@/lib/articles";
 import { getEnabledPages } from "@/lib/config";
 
+/**
+ * Explicit refresh. Single-page refreshes await the queued, deduplicated job
+ * (the global fetch queue caps concurrency app-wide, so this can't storm the
+ * VM). Refresh-all enqueues every page and returns immediately — the client
+ * re-reads cached data right away and fresh results land as the queue drains.
+ */
 export async function POST(request: Request) {
   const { searchParams } = new URL(request.url);
   const page = searchParams.get("page");
@@ -10,15 +16,13 @@ export async function POST(request: Request) {
   try {
     if (!page) {
       const pages = getEnabledPages();
-      const results = await Promise.all(
-        pages.map((p) => getArticlesForPage(p.id, { force: true }))
-      );
+      // Fire through the queue without awaiting — queue caps concurrency at 3.
+      for (const p of pages) {
+        void refreshPageInBackground(p.id).catch(() => {});
+      }
       return NextResponse.json({
-        refreshed: results.map((r) => ({
-          page: r.page,
-          count: r.articles.length,
-          stale: r.stale,
-        })),
+        status: "refreshing",
+        pages: pages.map((p) => p.id),
       });
     }
 

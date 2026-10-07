@@ -116,7 +116,7 @@ export default function TopStoriesPage() {
       const res = await fetch("/api/articles/refresh", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await load();
-      toast("Refreshed all pages");
+      toast("Refresh started — results appear as they arrive");
     } catch {
       toast("Refresh failed");
       setLoading(false);

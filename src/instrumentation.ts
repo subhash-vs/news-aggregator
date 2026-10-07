@@ -1,21 +1,18 @@
 /**
  * Server instrumentation — runs once when the Next.js server starts.
  *
- * Keep-warm: refresh ONE page per tick (round-robin), every 20 minutes.
- * Rotating instead of re-fetching every source on every cycle cuts idle
- * load ~6× on the 512MB VM; stale-while-revalidate covers the gap whenever
- * someone actually visits. Full coverage lands within ~2h — far inside the
- * 24h article retention, so cold starts essentially never happen.
+ * Keep-warm through the global fetch queue (max 3 concurrent, deduped,
+ * circuit-broken):
+ *  - Boot: enqueue every content page once so a restarted VM recovers fast.
+ *    Safe to enqueue all at once — the queue caps concurrency, this does not.
+ *  - Every 20 min: rotate ONE page and ONE publisher top-feed, so idle load
+ *    stays tiny while every cache still refreshes within ~2-3h.
  *
- * A heap guard skips the tick entirely when memory is already high, so the
- * background loop can never push the cgroup into swap thrash. (The previous
- * all-pages loop + an rss-parser socket leak froze the whole VM once idle;
- * both are fixed — this guard is the belt-and-braces.)
+ * Request handlers never fetch (they read SQLite); this timer plus explicit
+ * user refreshes are the only things that enqueue work.
  */
 const KEEP_WARM_INTERVAL_MS = 20 * 60 * 1000;
 const INITIAL_DELAY_MS = 30_000;
-/** Skip a refresh tick if the heap is already this high — protect the 380M cgroup. */
-const HEAP_SKIP_BYTES = 300 * 1024 * 1024;
 
 export async function register(): Promise<void> {
   // Only run in the Node.js server runtime, never during build or edge.
@@ -28,40 +25,52 @@ export async function register(): Promise<void> {
   const { getEnabledPages } = await import("@/lib/config");
   const { SPECIAL_PAGE_IDS } = await import("@/lib/constants");
   const { refreshPageInBackground } = await import("@/lib/articles");
+  const { refreshAllSourceTops } = await import("@/lib/source-tops");
+  const { SOURCE_TOP_FEEDS } = await import("@/lib/source-tops");
 
-  let cursor = 0;
-  let running = false;
+  const contentPages = () =>
+    getEnabledPages().filter((p) => !SPECIAL_PAGE_IDS.has(p.id));
 
-  const tick = async (): Promise<void> => {
-    if (running) return; // never overlap refresh cycles
-    const heap = process.memoryUsage().heapUsed;
-    if (heap > HEAP_SKIP_BYTES) {
-      console.warn(
-        `[keep-warm] Skipping refresh — heap at ${(heap / 1024 / 1024).toFixed(0)}MB`
-      );
-      return;
-    }
-    running = true;
+  let pageCursor = 0;
+  let feedCursor = 0;
+
+  const enqueueOnePage = (): void => {
+    const pages = contentPages();
+    if (pages.length === 0) return;
+    const page = pages[pageCursor % pages.length];
+    pageCursor += 1;
+    void refreshPageInBackground(page.id).catch(() => {});
+  };
+
+  const tick = (): void => {
     try {
-      // Re-read pages each tick so settings changes apply without a restart.
-      const contentPages = getEnabledPages().filter((p) => !SPECIAL_PAGE_IDS.has(p.id));
-      if (contentPages.length === 0) return;
-      const page = contentPages[cursor % contentPages.length];
-      cursor += 1;
-      await refreshPageInBackground(page.id);
+      enqueueOnePage();
+      // Rotate publisher feeds one per tick as well.
+      if (SOURCE_TOP_FEEDS.length > 0) {
+        feedCursor += 1;
+        // refreshAllSourceTops enqueues through the same deduped queue,
+        // so calling it is harmless; the circuit breaker skips cooling feeds.
+        if (feedCursor % 3 === 0) {
+          refreshAllSourceTops();
+        }
+      }
     } catch (error) {
-      console.error("[keep-warm] Refresh failed:", error);
-    } finally {
-      running = false;
+      console.error("[keep-warm] tick failed:", error);
     }
   };
 
-  g.__newsKeepWarm = setInterval(() => {
-    void tick();
-  }, KEEP_WARM_INTERVAL_MS);
+  g.__newsKeepWarm = setInterval(tick, KEEP_WARM_INTERVAL_MS);
 
-  // First warm-up shortly after boot so a restarted VM recovers quickly.
+  // First warm-up shortly after boot: enqueue everything at once. The global
+  // fetch queue drains it at max 3 concurrent — no socket storm possible.
   setTimeout(() => {
-    void tick();
+    try {
+      for (const _page of contentPages()) {
+        enqueueOnePage();
+      }
+      refreshAllSourceTops();
+    } catch (error) {
+      console.error("[keep-warm] initial warm-up failed:", error);
+    }
   }, INITIAL_DELAY_MS);
 }

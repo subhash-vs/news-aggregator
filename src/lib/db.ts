@@ -104,6 +104,19 @@ retryExec(`
     article_json TEXT NOT NULL,
     saved_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS source_tops (
+    feed_id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    publisher TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    fidelity TEXT,
+    feed_url TEXT,
+    page TEXT,
+    articles_json TEXT NOT NULL,
+    error TEXT,
+    fetched_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations for existing DBs

@@ -3,6 +3,7 @@ import { SPECIAL_PAGE_IDS } from "./constants";
 import { getMaxAgeHours, getPageConfig, getSortMode } from "./config";
 import { excludeAds } from "./ads";
 import { fetchFromSource } from "./fetchers";
+import { enqueueFetch, isFeedCooledOff, recordFeedFailure, recordFeedSuccess } from "./feed-queue";
 import { excludeNonEnglish } from "./language";
 import { rankArticles } from "./rank";
 import { cleanText } from "@/lib/html";
@@ -193,7 +194,18 @@ async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
 
   const enabledSources = page.sources.filter((s) => s.enabled);
   const results = await mapWithConcurrency(enabledSources, 2, async (source) => {
+    if (isFeedCooledOff(`page:${pageId}:${source.id}`)) {
+      return {
+        source,
+        result: { articles: [], error: "Cooling down after repeated failures" },
+      };
+    }
     const result = await fetchFromSource(source, pageId);
+    if (result.error) {
+      recordFeedFailure(`page:${pageId}:${source.id}`);
+    } else {
+      recordFeedSuccess(`page:${pageId}:${source.id}`);
+    }
     return { source, result };
   });
 
@@ -213,24 +225,19 @@ async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
   }));
 }
 
-/** Pages with a refresh already in flight (dedup guard for background work). */
-const backgroundRefreshes = new Set<string>();
+/** Last completed refresh statuses per page (shared across deduped callers). */
+const lastStatuses = new Map<string, SourceStatus[]>();
 
 /**
- * Refresh a page in the background without blocking any response.
- * Deduped per page so repeated stale hits don't stack fetches.
+ * Refresh a page through the global fetch queue (max 3 concurrent across the
+ * whole app, deduped per page, per-feed circuit breaker). Returns the source
+ * statuses once the queued run completes; concurrent callers share one run.
  */
-export function refreshPageInBackground(pageId: string): Promise<void> {
-  if (backgroundRefreshes.has(pageId)) return Promise.resolve();
-  backgroundRefreshes.add(pageId);
-  return fetchAndStore(pageId)
-    .then(() => undefined)
-    .catch((error) => {
-      console.error(`[articles] Background refresh failed for ${pageId}:`, error);
-    })
-    .finally(() => {
-      backgroundRefreshes.delete(pageId);
-    });
+export function refreshPageInBackground(pageId: string): Promise<SourceStatus[]> {
+  const run = enqueueFetch(`page:${pageId}`, async () => {
+    lastStatuses.set(pageId, await fetchAndStore(pageId));
+  });
+  return run.then(() => lastStatuses.get(pageId) ?? []);
 }
 
 export async function getArticlesForPage(
@@ -275,16 +282,18 @@ export async function getArticlesForPage(
     return buildResponse(cached, false, [], cached[0]?.fetchedAt ?? undefined);
   }
 
-  // Stale-but-present: serve immediately. The route schedules a background
-  // refresh via after(); the client polls and picks up fresh data shortly.
+  // Stale-but-present: serve immediately and refresh through the queue in the
+  // background. The client polls and picks up fresh data shortly.
   if (cached.length > 0 && !options?.force) {
+    void refreshPageInBackground(pageId).catch(() => {});
     return buildResponse(cached, true, [], cached[0]?.fetchedAt ?? undefined);
   }
 
-  // Cold start (empty cache) or explicit refresh: block while fetching.
-  // Sources are sequenced (2 at a time) and each has a hard timeout, so the
-  // worst case is bounded — no more minute-long hangs.
-  const sourceStatus = await fetchAndStore(pageId);
+  // Cold start (empty cache) or explicit refresh: enqueue through the global
+  // fetch queue and await the result. The queue caps concurrency app-wide, so
+  // even simultaneous cold starts across pages can't storm the VM — and the
+  // HTTP layer still bounds every individual source fetch.
+  const sourceStatus = await refreshPageInBackground(pageId);
   const fresh = filterByAge(getCachedArticles(pageId), maxAgeHours);
   return buildResponse(fresh, sourceStatus.some((s) => !s.ok), sourceStatus);
 }
