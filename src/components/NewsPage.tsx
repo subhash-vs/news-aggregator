@@ -117,6 +117,25 @@ export function NewsPage({
     void load(false);
   }, [load]);
 
+  // Stale-while-revalidate client: when the server serves cached-but-stale
+  // articles, a background refresh is already running. Poll every ~8s (capped)
+  // until fresh data arrives instead of showing outdated news indefinitely.
+  const stalePollsRef = useRef(0);
+  useEffect(() => {
+    if (!data?.stale) {
+      stalePollsRef.current = 0;
+      return;
+    }
+    if (stalePollsRef.current >= 8) return; // ~1 minute max of polling
+    stalePollsRef.current += 1;
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        void load(false);
+      }
+    }, 8_000);
+    return () => window.clearTimeout(timer);
+  }, [data, load]);
+
   useEffect(() => {
     const minutes = data?.refreshIntervalMinutes ?? 0;
     if (!minutes || minutes <= 0) return;

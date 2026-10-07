@@ -6,6 +6,7 @@ import { fetchFromSource } from "./fetchers";
 import { excludeNonEnglish } from "./language";
 import { rankArticles } from "./rank";
 import { cleanText } from "@/lib/html";
+import { mapWithConcurrency } from "@/lib/http";
 import { categoryKeywordPatterns, textMatchesAnyKeyword } from "@/lib/keywords";
 import type { Article, ArticlesResponse, Category, SortMode, SourceStatus } from "@/types";
 
@@ -181,6 +182,57 @@ function emptyResponse(
   };
 }
 
+/**
+ * Fetch every enabled source for a page — only 2 at a time so the 512MB VM
+ * never opens a flood of sockets — then store results and prune.
+ * Bounded by per-source fetch timeouts (~8-10s worst case each).
+ */
+async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
+  const page = getPageConfig(pageId);
+  if (!page || SPECIAL_PAGE_IDS.has(pageId)) return [];
+
+  const enabledSources = page.sources.filter((s) => s.enabled);
+  const results = await mapWithConcurrency(enabledSources, 2, async (source) => {
+    const result = await fetchFromSource(source, pageId);
+    return { source, result };
+  });
+
+  const unfiltered = results.flatMap(({ result }) => result.articles);
+  if (unfiltered.length > 0) {
+    upsertArticles(pageId, unfiltered);
+    pruneCache();
+  }
+
+  return results.map(({ source, result }) => ({
+    id: source.id,
+    name: source.name,
+    type: source.type,
+    ok: !result.error,
+    count: result.articles.length,
+    error: result.error,
+  }));
+}
+
+/** Pages with a refresh already in flight (dedup guard for background work). */
+const backgroundRefreshes = new Set<string>();
+
+/**
+ * Refresh a page in the background without blocking any response.
+ * Deduped per page so repeated stale hits don't stack fetches.
+ */
+export function refreshPageInBackground(pageId: string): Promise<void> {
+  if (backgroundRefreshes.has(pageId)) return Promise.resolve();
+  backgroundRefreshes.add(pageId);
+  return fetchAndStore(pageId)
+    .then(() => undefined)
+    .catch((error) => {
+      console.error(`[articles] Background refresh failed for ${pageId}:`, error);
+    })
+    .finally(() => {
+      backgroundRefreshes.delete(pageId);
+    });
+}
+
 export async function getArticlesForPage(
   pageId: string,
   options?: { force?: boolean }
@@ -192,85 +244,47 @@ export async function getArticlesForPage(
     return emptyResponse(pageId, [], maxAgeHours, sortMode);
   }
 
+  const buildResponse = (
+    articles: Article[],
+    stale: boolean,
+    sourceStatus: SourceStatus[],
+    generatedAt?: string
+  ): ArticlesResponse => {
+    const categories = page.categories.filter((c) => c.enabled);
+    const withCategories = cleanFeedArticles(dedupeArticles(articles)).map((article) => ({
+      ...article,
+      category: article.category ?? matchCategory(article, categories),
+    }));
+    return {
+      page: pageId,
+      articles: rankArticles(filterByAge(withCategories, maxAgeHours), sortMode),
+      categories,
+      stale,
+      generatedAt: generatedAt ?? new Date().toISOString(),
+      refreshIntervalMinutes: page.refreshIntervalMinutes ?? 0,
+      maxAgeHours,
+      sortMode,
+      sourceStatus,
+    };
+  };
+
   const cached = filterByAge(getCachedArticles(pageId), maxAgeHours);
   const cacheFresh = cached.length > 0 && !isCacheStale(pageId);
 
   if (cacheFresh && !options?.force) {
-    return {
-      page: pageId,
-      articles: rankArticles(cleanFeedArticles(dedupeArticles(cached)), sortMode),
-      categories: page.categories.filter((c) => c.enabled),
-      stale: false,
-      generatedAt: cached[0]?.fetchedAt ?? new Date().toISOString(),
-      refreshIntervalMinutes: page.refreshIntervalMinutes ?? 0,
-      maxAgeHours,
-      sortMode,
-      sourceStatus: [],
-    };
+    return buildResponse(cached, false, [], cached[0]?.fetchedAt ?? undefined);
   }
 
-  const enabledSources = page.sources.filter((s) => s.enabled);
-
-  const results = await Promise.all(
-    enabledSources.map(async (source) => {
-      const result = await fetchFromSource(source, pageId);
-      return { source, result };
-    })
-  );
-
-  const sourceStatus: SourceStatus[] = results.map(({ source, result }) => ({
-    id: source.id,
-    name: source.name,
-    type: source.type,
-    ok: !result.error,
-    count: result.articles.length,
-    error: result.error,
-  }));
-
-  const freshArticles = filterByAge(
-    results.flatMap(({ result }) => result.articles),
-    maxAgeHours
-  );
-  const anySuccess = results.some(({ result }) => !result.error);
-  const failedCount = results.filter(({ result }) => result.error).length;
-
-  let articles: Article[];
-  let stale = false;
-
-  if (freshArticles.length > 0 || (anySuccess && enabledSources.length === 0)) {
-    articles = freshArticles;
-    const unfiltered = results.flatMap(({ result }) => result.articles);
-    upsertArticles(pageId, unfiltered);
-    pruneCache();
-  } else if (cached.length > 0) {
-    articles = cached;
-    stale = true;
-  } else {
-    articles = [];
+  // Stale-but-present: serve immediately. The route schedules a background
+  // refresh via after(); the client polls and picks up fresh data shortly.
+  if (cached.length > 0 && !options?.force) {
+    return buildResponse(cached, true, [], cached[0]?.fetchedAt ?? undefined);
   }
 
-  if (failedCount > 0 && freshArticles.length > 0 && cached.length > 0) {
-    const freshIds = new Set(freshArticles.map((a) => a.id));
-    const merged = [...freshArticles, ...cached.filter((a) => !freshIds.has(a.id))];
-    articles = merged.slice(0, 80);
-    stale = true;
-  }
-
-  const categories = page.categories.filter((c) => c.enabled);
-  const withCategories = cleanFeedArticles(dedupeArticles(articles)).map((article) => ({
-    ...article,
-    category: article.category ?? matchCategory(article, categories),
-  }));
-
-  return {
-    page: pageId,
-    articles: rankArticles(filterByAge(withCategories, maxAgeHours), sortMode),
-    categories,
-    stale,
-    generatedAt: new Date().toISOString(),
-    refreshIntervalMinutes: page.refreshIntervalMinutes ?? 0,
-    maxAgeHours,
-    sortMode,
-    sourceStatus,
-  };
+  // Cold start (empty cache) or explicit refresh: block while fetching.
+  // Sources are sequenced (2 at a time) and each has a hard timeout, so the
+  // worst case is bounded — no more minute-long hangs.
+  const sourceStatus = await fetchAndStore(pageId);
+  const fresh = filterByAge(getCachedArticles(pageId), maxAgeHours);
+  return buildResponse(fresh, sourceStatus.some((s) => !s.ok), sourceStatus);
 }

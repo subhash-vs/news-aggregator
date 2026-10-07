@@ -1,5 +1,6 @@
 import type { Article, FetchResult } from "@/types";
 import { cleanText } from "@/lib/html";
+import { fetchWithTimeout } from "@/lib/http";
 
 const GUARDIAN_BASE = "https://content.guardianapis.com";
 
@@ -19,7 +20,7 @@ export async function fetchGuardian(section: string, page: string): Promise<Fetc
       order: "newest",
     });
 
-    const res = await fetch(`${GUARDIAN_BASE}/search?${params.toString()}`);
+    const res = await fetchWithTimeout(`${GUARDIAN_BASE}/search?${params.toString()}`);
     if (!res.ok) {
       return { articles: [], error: `Guardian HTTP ${res.status}` };
     }

@@ -1,5 +1,6 @@
 import type { Article, FetchResult } from "@/types";
 import { cleanText } from "@/lib/html";
+import { fetchWithTimeout } from "@/lib/http";
 
 interface RedditChild {
   data: {
@@ -17,7 +18,7 @@ interface RedditChild {
 
 export async function fetchReddit(subreddit: string, page: string): Promise<FetchResult> {
   try {
-    const res = await fetch(`https://www.reddit.com/r/${subreddit}.json?limit=25`, {
+    const res = await fetchWithTimeout(`https://www.reddit.com/r/${subreddit}.json?limit=25`, {
       headers: {
         "User-Agent": "news-aggregator/0.1 (personal news reader)",
       },

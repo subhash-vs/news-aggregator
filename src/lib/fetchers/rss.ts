@@ -1,6 +1,7 @@
 import Parser from "rss-parser";
 import type { Article, FetchResult } from "@/types";
 import { cleanText, decodeHtmlEntities } from "@/lib/html";
+import { withTimeout } from "@/lib/http";
 
 type MediaNode = {
   $?: { url?: string; medium?: string; type?: string; width?: string; height?: string };
@@ -99,7 +100,7 @@ function normalizeDate(value?: string | Date): string | null {
 
 export async function fetchRSS(url: string, source: string, page: string): Promise<FetchResult> {
   try {
-    const feed = await parser.parseURL(url);
+    const feed = await withTimeout(parser.parseURL(url), 10_000, `RSS ${url}`);
 
     const articles: Article[] = (feed.items ?? []).map((item, index) => {
       const itemAny = item as {

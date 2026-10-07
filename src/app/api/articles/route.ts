@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getArticlesForPage } from "@/lib/articles";
+import { after, NextResponse } from "next/server";
+import { getArticlesForPage, refreshPageInBackground } from "@/lib/articles";
 import { getEnabledPages } from "@/lib/config";
 
 export async function GET(request: Request) {
@@ -16,6 +16,14 @@ export async function GET(request: Request) {
 
   try {
     const data = await getArticlesForPage(page);
+
+    // Stale-while-revalidate: if we served cached (stale) articles, refresh
+    // sources in the background so the next request gets fresh data without
+    // ever blocking a response on network fetches.
+    if (data.stale) {
+      after(() => refreshPageInBackground(page));
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("[api/articles] Failed:", error);
