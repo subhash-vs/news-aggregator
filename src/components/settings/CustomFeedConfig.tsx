@@ -93,14 +93,24 @@ export function CustomFeedConfig({
     setSearchQuery("");
   }
 
-  function remove(sourceId: string) {
-    if (!page) return;
-    updateSources(page.sources.filter((s) => s.id !== sourceId));
+  function remove(targetPageId: string, sourceId: string) {
+    onChange({
+      ...config,
+      pages: config.pages.map((p) =>
+        p.id === targetPageId ? { ...p, sources: p.sources.filter((s) => s.id !== sourceId) } : p
+      ),
+    });
   }
 
   if (!page) return <p className="text-sm text-muted-foreground">No pages configured.</p>;
 
-  const customFeeds = page.sources.filter((s) => s.custom);
+  // Show EVERY saved custom feed/search across all pages, grouped by page —
+  // the dropdown only picks where NEW additions go. (Previously this list
+  // only showed the selected page's feeds, and defaulted to the first page,
+  // so saved keywords on other pages appeared to be missing.)
+  const feedGroups = pages
+    .map((p) => ({ page: p, feeds: p.sources.filter((s) => s.custom) }))
+    .filter((g) => g.feeds.length > 0);
 
   return (
     <section>
@@ -186,30 +196,41 @@ export function CustomFeedConfig({
         </button>
       </form>
 
-      <ul className="space-y-2">
-        {customFeeds.map((source) => (
-          <li
-            key={source.id}
-            className="flex items-center justify-between gap-3 border border-border bg-background p-3"
-          >
-            <div className="min-w-0">
-              <p className="font-display font-bold text-foreground">{source.name}</p>
-              <p className="truncate text-xs text-muted-foreground">{source.config.feedUrl}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => remove(source.id)}
-              aria-label={`Delete feed ${source.name}`}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-border text-muted-foreground hover:border-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden />
-            </button>
+      <ul className="space-y-4">
+        {feedGroups.map((group) => (
+          <li key={group.page.id}>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {group.page.label}
+            </p>
+            <ul className="space-y-2">
+              {group.feeds.map((source) => (
+                <li
+                  key={source.id}
+                  className="flex items-center justify-between gap-3 border border-border bg-background p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-display font-bold text-foreground">{source.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{source.config.feedUrl}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => remove(group.page.id, source.id)}
+                    aria-label={`Delete feed ${source.name}`}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-border text-muted-foreground hover:border-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>
 
-      {customFeeds.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No custom feeds on this page yet.</p>
+      {feedGroups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No custom feeds or searches saved yet.
+        </p>
       ) : null}
     </section>
   );
