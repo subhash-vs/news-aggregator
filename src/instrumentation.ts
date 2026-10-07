@@ -1,14 +1,21 @@
 /**
  * Server instrumentation — runs once when the Next.js server starts.
  *
- * Keep-warm loop: refresh every enabled page every 20 minutes (inside the
- * 30-min staleness window) so the SQLite cache is ALWAYS warm before a
- * human shows up. This lives in the app itself — zero GitHub Actions usage,
- * zero external schedulers. On the 512MB VM each refresh is sequenced
- * (2 sources at a time, 8s fetch timeouts) and deduped per page.
+ * Keep-warm: refresh ONE page per tick (round-robin), every 20 minutes.
+ * Rotating instead of re-fetching every source on every cycle cuts idle
+ * load ~6× on the 512MB VM; stale-while-revalidate covers the gap whenever
+ * someone actually visits. Full coverage lands within ~2h — far inside the
+ * 24h article retention, so cold starts essentially never happen.
+ *
+ * A heap guard skips the tick entirely when memory is already high, so the
+ * background loop can never push the cgroup into swap thrash. (The previous
+ * all-pages loop + an rss-parser socket leak froze the whole VM once idle;
+ * both are fixed — this guard is the belt-and-braces.)
  */
 const KEEP_WARM_INTERVAL_MS = 20 * 60 * 1000;
 const INITIAL_DELAY_MS = 30_000;
+/** Skip a refresh tick if the heap is already this high — protect the 380M cgroup. */
+const HEAP_SKIP_BYTES = 300 * 1024 * 1024;
 
 export async function register(): Promise<void> {
   // Only run in the Node.js server runtime, never during build or edge.
@@ -19,30 +26,42 @@ export async function register(): Promise<void> {
   if (g.__newsKeepWarm) return;
 
   const { getEnabledPages } = await import("@/lib/config");
+  const { SPECIAL_PAGE_IDS } = await import("@/lib/constants");
   const { refreshPageInBackground } = await import("@/lib/articles");
 
-  const refreshAll = async (): Promise<void> => {
-    // Sequence pages one at a time; each page already limits source
-    // concurrency internally. Failures are logged inside refreshPageInBackground.
-    for (const page of getEnabledPages()) {
+  let cursor = 0;
+  let running = false;
+
+  const tick = async (): Promise<void> => {
+    if (running) return; // never overlap refresh cycles
+    const heap = process.memoryUsage().heapUsed;
+    if (heap > HEAP_SKIP_BYTES) {
+      console.warn(
+        `[keep-warm] Skipping refresh — heap at ${(heap / 1024 / 1024).toFixed(0)}MB`
+      );
+      return;
+    }
+    running = true;
+    try {
+      // Re-read pages each tick so settings changes apply without a restart.
+      const contentPages = getEnabledPages().filter((p) => !SPECIAL_PAGE_IDS.has(p.id));
+      if (contentPages.length === 0) return;
+      const page = contentPages[cursor % contentPages.length];
+      cursor += 1;
       await refreshPageInBackground(page.id);
+    } catch (error) {
+      console.error("[keep-warm] Refresh failed:", error);
+    } finally {
+      running = false;
     }
   };
 
-  const timer = setInterval(() => {
-    void refreshAll().catch((error) => {
-      console.error("[keep-warm] Refresh cycle failed:", error);
-    });
+  g.__newsKeepWarm = setInterval(() => {
+    void tick();
   }, KEEP_WARM_INTERVAL_MS);
 
-  // Don't let the interval keep `register()` pending — the docs require
-  // register to complete before the server accepts requests.
-  g.__newsKeepWarm = timer;
-
-  // First warm-up shortly after boot so a restarted VM is ready quickly.
+  // First warm-up shortly after boot so a restarted VM recovers quickly.
   setTimeout(() => {
-    void refreshAll().catch((error) => {
-      console.error("[keep-warm] Initial refresh failed:", error);
-    });
+    void tick();
   }, INITIAL_DELAY_MS);
 }

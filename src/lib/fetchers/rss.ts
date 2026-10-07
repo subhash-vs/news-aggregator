@@ -1,7 +1,6 @@
 import Parser from "rss-parser";
 import type { Article, FetchResult } from "@/types";
 import { cleanText, decodeHtmlEntities } from "@/lib/html";
-import { withTimeout } from "@/lib/http";
 
 type MediaNode = {
   $?: { url?: string; medium?: string; type?: string; width?: string; height?: string };
@@ -18,6 +17,10 @@ const parser = new Parser({
     ],
   },
 });
+
+const RSS_TIMEOUT_MS = 10_000;
+/** Hard cap on feed size — a runaway feed must never OOM the 512MB VM. */
+const MAX_FEED_BYTES = 5 * 1024 * 1024;
 
 function firstUrlFromMedia(value: unknown): string | null {
   if (!value) return null;
@@ -98,9 +101,51 @@ function normalizeDate(value?: string | Date): string | null {
   return date.toISOString();
 }
 
+/**
+ * Download a feed ourselves, then parse the string.
+ *
+ * rss-parser's parseURL never aborts its underlying request on timeout — the
+ * socket stays open and its `xml += chunk` buffer keeps growing, leaking
+ * memory on every timed-out fetch. That leak, hammered by the keep-warm loop,
+ * froze the whole 512MB VM into swap thrash. Fetching via AbortController
+ * keeps the signal armed for the ENTIRE download (headers + body), so a
+ * trickling server can't hold us hostage, and the body size is capped.
+ */
+async function downloadFeedXml(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RSS_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "news-aggregator/0.1 (personal news reader)",
+        Accept: "application/rss+xml, application/xml, text/xml, */*",
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`RSS HTTP ${res.status}`);
+    }
+
+    const declared = Number(res.headers.get("content-length") ?? 0);
+    if (declared > MAX_FEED_BYTES) {
+      throw new Error(`Feed too large (${declared} bytes)`);
+    }
+
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > MAX_FEED_BYTES) {
+      throw new Error(`Feed too large (${buf.byteLength} bytes)`);
+    }
+    return Buffer.from(buf).toString("utf8");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchRSS(url: string, source: string, page: string): Promise<FetchResult> {
   try {
-    const feed = await withTimeout(parser.parseURL(url), 10_000, `RSS ${url}`);
+    const xml = await downloadFeedXml(url);
+    // parseString is CPU-only (no network), so it can't hang like parseURL did.
+    const feed = await parser.parseString(xml);
 
     const articles: Article[] = (feed.items ?? []).map((item, index) => {
       const itemAny = item as {

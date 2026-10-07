@@ -15,30 +15,6 @@ export async function fetchWithTimeout(
   }
 }
 
-/** Reject a promise if it doesn't settle within `timeoutMs` (for non-fetch I/O like rss-parser). */
-export function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
-      timeoutMs
-    );
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
-}
-
 /**
  * Map over items with a bounded number of in-flight promises.
  * Keeps the 512MB VM from opening dozens of sockets at once.

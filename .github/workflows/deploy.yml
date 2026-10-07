@@ -74,8 +74,8 @@ jobs:
               sudo swapon /swapfile
               echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab
             fi
-            printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nMemoryMax=380M\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
-            sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || true
+            printf "[Unit]\nDescription=News Aggregator\nAfter=network.target\n\n[Service]\nType=simple\nUser=opc\nWorkingDirectory=/home/opc/news-aggregator\nExecStartPre=+/bin/sh -c \"/usr/sbin/iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || /usr/sbin/iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000\"\nExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3000\nEnvironment=HOSTNAME=0.0.0.0\nEnvironment=NODE_OPTIONS=--experimental-sqlite\nMemoryMax=380M\nMemorySwapMax=0\nRestart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n" | sudo tee /etc/systemd/system/news-aggregator.service > /dev/null
+            sudo /usr/sbin/iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 2>/dev/null || sudo /usr/sbin/iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000
             sudo systemctl daemon-reload
             sudo systemctl enable news-aggregator
             sudo systemctl restart news-aggregator
