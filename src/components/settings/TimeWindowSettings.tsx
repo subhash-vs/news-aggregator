@@ -52,6 +52,9 @@ export function TimeWindowSettings({
     onChange({
       ...config,
       settings: {
+        // Spread first so fields added later (e.g. yahooFinanceSymbols)
+        // survive unrelated setting changes.
+        ...config.settings,
         maxAgeHours: partial.maxAgeHours ?? value,
         sortMode: partial.sortMode ?? sortMode,
         designTheme: config.settings?.designTheme ?? "broadsheet",

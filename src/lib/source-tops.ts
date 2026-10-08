@@ -3,8 +3,10 @@ import { excludeAds } from "./ads";
 import { fetchRSS } from "./fetchers/rss";
 import { fetchHN } from "./fetchers/hackernews";
 import { enqueueFetch, isFeedCooledOff, recordFeedFailure, recordFeedSuccess } from "./feed-queue";
+import { getYahooFinanceSymbols } from "./config";
 import { db } from "./db";
 import { excludeNonEnglish } from "./language";
+import { yahooFeedUrl } from "./yahoo-finance";
 import type { Article } from "@/types";
 
 /* Hoisted prepared statements — see db.ts note; these run per publisher-feed
@@ -107,11 +109,12 @@ export const SOURCE_TOP_FEEDS: SourceTopFeed[] = [
   },
   {
     id: "yahoo-finance",
-    label: "Yahoo Finance",
+    label: "Yahoo Finance Watchlist",
     publisher: "Yahoo Finance",
     kind: "rss",
     fidelity: "front-page",
-    feedUrl: "https://finance.yahoo.com/news/rssindex",
+    // No static feedUrl — resolved at refresh time from
+    // settings.yahooFinanceSymbols (Yahoo killed its general finance RSS).
   },
   {
     id: "aljazeera",
@@ -239,7 +242,8 @@ function rowToResult(row: SourceTopRow): SourceTopResult {
 function upsertSourceTopRow(
   feed: SourceTopFeed,
   articles: Article[],
-  error: string | null
+  error: string | null,
+  feedUrl: string | null
 ): void {
   stmtUpsertSourceTop.run({
     $id: feed.id,
@@ -247,7 +251,7 @@ function upsertSourceTopRow(
     $publisher: feed.publisher,
     $kind: feed.kind,
     $fidelity: feed.fidelity,
-    $feedUrl: feed.feedUrl ?? null,
+    $feedUrl: feedUrl,
     $page: fetchPageOf(feed),
     $articles: JSON.stringify(articles),
     $error: error,
@@ -259,6 +263,18 @@ function fetchPageOf(feed: SourceTopFeed): string | null {
 }
 
 /**
+ * Resolve a feed's URL. The Yahoo watchlist entry has no static URL — its
+ * URL is built from settings.yahooFinanceSymbols at fetch time, so editing
+ * the watchlist in Settings changes what gets fetched without a redeploy.
+ */
+function resolveFeedUrl(feed: SourceTopFeed): string | null {
+  if (feed.id === "yahoo-finance") {
+    return yahooFeedUrl(getYahooFinanceSymbols());
+  }
+  return feed.feedUrl ?? null;
+}
+
+/**
  * Refresh one publisher feed through the global fetch queue and persist the
  * result to SQLite. Never called from a request path directly — routes call
  * `getCachedSourceTops()`, which schedules this in the background.
@@ -267,10 +283,16 @@ function refreshOne(feed: SourceTopFeed): Promise<void> {
   return enqueueFetch(`sourcetop:${feed.id}`, async () => {
     if (isFeedCooledOff(`sourcetop:${feed.id}`)) return;
     try {
+      const feedUrl = resolveFeedUrl(feed);
+      if (feed.kind === "rss" && !feedUrl) {
+        // RSS feed without a resolvable URL (e.g. empty watchlist) — skip.
+        recordFeedFailure(`sourcetop:${feed.id}`);
+        return;
+      }
       const result =
         feed.kind === "hn"
           ? await fetchHN(20, feed.page ?? "technology")
-          : await fetchRSS(feed.feedUrl!, feed.label, "top");
+          : await fetchRSS(feedUrl!, feed.label, "top");
 
       if (result.notModified) {
         // 304 — feed unchanged. Keep cached articles, reset the staleness clock.
@@ -289,7 +311,12 @@ function refreshOne(feed: SourceTopFeed): Promise<void> {
         recordFeedSuccess(`sourcetop:${feed.id}`);
       }
       // On error keep the previous articles if we have them; just note the error.
-      upsertSourceTopRow(feed, articles.length ? articles : readCachedArticles(feed.id), result.error ?? null);
+      upsertSourceTopRow(
+        feed,
+        articles.length ? articles : readCachedArticles(feed.id),
+        result.error ?? null,
+        feedUrl
+      );
     } catch (error) {
       recordFeedFailure(`sourcetop:${feed.id}`);
       console.error(`[source-tops] Refresh failed for ${feed.id}:`, error);
@@ -317,6 +344,10 @@ function scheduleStaleRefreshes(rows: Map<string, SourceTopRow>): void {
     if (row) {
       const fetched = Date.parse(row.fetched_at);
       stale = !Number.isFinite(fetched) || now - fetched > CACHE_TTL_MS;
+      // URL drift — e.g. the user edited the Yahoo watchlist in Settings.
+      // The cached row was fetched from the old symbol list; refetch now
+      // instead of serving stale articles until the TTL expires.
+      if (!stale && row.feed_url !== resolveFeedUrl(feed)) stale = true;
     }
     if (stale) {
       void refreshOne(feed).catch(() => {});

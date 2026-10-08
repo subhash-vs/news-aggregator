@@ -1,4 +1,5 @@
 import type { AppConfig } from "@/types";
+import { DEFAULT_YAHOO_SYMBOLS, yahooFeedUrl } from "./yahoo-finance";
 
 function rss(name: string, feedUrl: string, id?: string) {
   const slug = name
@@ -20,6 +21,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     sortMode: "latest",
     designTheme: "broadsheet",
     latestWindowHours: 2,
+    yahooFinanceSymbols: [...DEFAULT_YAHOO_SYMBOLS],
   },
   pages: [
     {
@@ -141,8 +143,15 @@ export const DEFAULT_CONFIG: AppConfig = {
         rss("CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
         rss("CNBC World", "https://www.cnbc.com/id/19854910/device/rss/rss.html"),
         rss("CNBC Investing", "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
-        rss("Yahoo Finance", "https://finance.yahoo.com/news/rssindex"),
-        rss("Yahoo Finance · Markets", "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"),
+        // Yahoo killed its general finance RSS (404, Oct 2026) — the per-symbol
+        // headline feed is the surviving replacement. Symbols are user-
+        // configurable (Settings → pages → Yahoo Finance watchlist).
+        rss(
+          "Yahoo Finance Watchlist",
+          yahooFeedUrl(DEFAULT_YAHOO_SYMBOLS) ??
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=VOO&region=US&lang=en-US",
+          "rss-yahoo-finance-watchlist"
+        ),
         rss("MarketWatch Top Stories", "https://feeds.content.dowjones.io/public/rss/mw_topstories"),
         rss("Business Insider", "https://www.businessinsider.com/rss"),
       ],

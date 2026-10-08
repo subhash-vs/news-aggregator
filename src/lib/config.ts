@@ -1,6 +1,7 @@
 import { DEFAULT_CONFIG } from "./defaults";
 import { getConfigRaw, onConfigRawChanged, saveConfigRaw } from "./seed";
 import { LATEST_WINDOW_HOURS } from "./constants";
+import { DEFAULT_YAHOO_SYMBOLS, normalizeYahooSymbols, yahooFeedUrl } from "./yahoo-finance";
 import type { AppConfig, AppSettings, Category, DesignTheme, Page, Source } from "@/types";
 import { validateConfig } from "./validate";
 
@@ -12,6 +13,42 @@ function normalizeLatestWindowHours(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return LATEST_WINDOW_HOURS;
   const n = Math.min(24, Math.max(1, Math.round(value)));
   return n;
+}
+
+/**
+ * Yahoo Finance feed migration + symbol binding. The Finance page's watchlist
+ * source is *managed* by settings.yahooFinanceSymbols:
+ *  - stored configs seeded before this feature carry the dead general RSS
+ *    (rssindex, 404'd Oct 2026) — rewritten to the per-symbol feed;
+ *  - once migrated, the source URL is re-derived from the CURRENT symbol
+ *    list on every normalize, so editing the watchlist in Settings updates
+ *    the Finance page too (normalize output feeds the Settings draft, which
+ *    is what gets persisted on the next save).
+ * Matches by known source ids and the dead URL — other Yahoo feeds the user
+ * added themselves are left alone.
+ */
+const DEAD_YAHOO_RSSINDEX = "https://finance.yahoo.com/news/rssindex";
+const MANAGED_YAHOO_SOURCE_IDS = new Set(["rss-yahoo-finance", "rss-yahoo-finance-watchlist"]);
+
+function migrateDeadYahooSource(page: Page, symbols: string[]): Page {
+  const watchlistUrl = yahooFeedUrl(symbols);
+  if (!watchlistUrl) return page;
+  let changed = false;
+  const sources = page.sources.map((s) => {
+    const isManaged =
+      MANAGED_YAHOO_SOURCE_IDS.has(s.id) ||
+      (s.type === "rss" && s.config?.feedUrl === DEAD_YAHOO_RSSINDEX);
+    if (s.type === "rss" && isManaged && s.config?.feedUrl !== watchlistUrl) {
+      changed = true;
+      return {
+        ...s,
+        name: "Yahoo Finance Watchlist",
+        config: { ...s.config, feedUrl: watchlistUrl },
+      };
+    }
+    return s;
+  });
+  return changed ? { ...page, sources } : page;
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -31,8 +68,16 @@ function normalizeConfig(config: AppConfig): AppConfig {
     latestWindowHours: normalizeLatestWindowHours(
       config.settings?.latestWindowHours ?? DEFAULT_CONFIG.settings?.latestWindowHours
     ),
+    yahooFinanceSymbols: normalizeYahooSymbols(
+      config.settings?.yahooFinanceSymbols ?? DEFAULT_YAHOO_SYMBOLS
+    ),
   };
-  return { ...config, settings };
+  const symbols = settings.yahooFinanceSymbols ?? DEFAULT_YAHOO_SYMBOLS;
+  return {
+    ...config,
+    settings,
+    pages: config.pages.map((p) => migrateDeadYahooSource(p, symbols)),
+  };
 }
 
 /**
@@ -82,6 +127,14 @@ export function getDesignTheme(): DesignTheme {
 
 export function getLatestWindowHours(): number {
   return getConfig().settings?.latestWindowHours ?? LATEST_WINDOW_HOURS;
+}
+
+export function getYahooFinanceSymbols(): string[] {
+  return (
+    getConfig().settings?.yahooFinanceSymbols ??
+    DEFAULT_CONFIG.settings?.yahooFinanceSymbols ??
+    DEFAULT_YAHOO_SYMBOLS
+  );
 }
 
 export function saveConfig(config: AppConfig): void {

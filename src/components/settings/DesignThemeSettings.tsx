@@ -47,6 +47,9 @@ export function DesignThemeSettings({
                 onChange({
                   ...config,
                   settings: {
+                    // Spread first so fields added later (e.g.
+                    // yahooFinanceSymbols) survive theme changes.
+                    ...config.settings,
                     maxAgeHours: config.settings?.maxAgeHours ?? 24,
                     sortMode: config.settings?.sortMode ?? "latest",
                     designTheme: opt.value,

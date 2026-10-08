@@ -10,6 +10,7 @@ import { CustomFeedConfig } from "@/components/settings/CustomFeedConfig";
 import { AutoRefreshSettings } from "@/components/settings/AutoRefreshSettings";
 import { TimeWindowSettings } from "@/components/settings/TimeWindowSettings";
 import { DesignThemeSettings } from "@/components/settings/DesignThemeSettings";
+import { YahooWatchlistSettings } from "@/components/settings/YahooWatchlistSettings";
 import { applyDesignTheme } from "@/components/DesignTheme";
 import { useToast } from "@/components/Toast";
 
@@ -147,6 +148,7 @@ return (
           <div className="space-y-8">
             <DesignThemeSettings config={draft} onChange={applyLocal} />
             <TimeWindowSettings config={draft} onChange={applyLocal} />
+            <YahooWatchlistSettings config={draft} onChange={applyLocal} />
             <PageReorder config={draft} onChange={applyLocal} />
             <AutoRefreshSettings config={draft} onChange={applyLocal} />
           </div>

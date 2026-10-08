@@ -1,4 +1,5 @@
 import type { AppConfig, ValidationResult } from "@/types";
+import { MAX_YAHOO_SYMBOLS } from "./yahoo-finance";
 
 const VALID_TYPES = new Set(["guardian", "hn", "reddit", "rss"]);
 
@@ -45,6 +46,16 @@ export function validateConfig(config: unknown): ValidationResult {
         const n = c.settings.latestWindowHours;
         if (typeof n !== "number" || !Number.isFinite(n) || n < 1 || n > 24) {
           errors.push("settings.latestWindowHours must be a number between 1 and 24");
+        }
+      }
+      if (c.settings.yahooFinanceSymbols !== undefined) {
+        const s = c.settings.yahooFinanceSymbols;
+        if (!Array.isArray(s) || s.some((x) => typeof x !== "string")) {
+          errors.push("settings.yahooFinanceSymbols must be an array of strings");
+        } else if (s.length > MAX_YAHOO_SYMBOLS) {
+          errors.push(
+            `settings.yahooFinanceSymbols must have at most ${MAX_YAHOO_SYMBOLS} symbols`
+          );
         }
       }
     }

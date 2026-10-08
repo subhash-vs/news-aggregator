@@ -57,6 +57,12 @@ export interface AppSettings {
   designTheme: DesignTheme;
   /** Lookback window for the Latest stream, in hours (1–24). */
   latestWindowHours?: number;
+  /**
+   * Yahoo Finance ticker symbols for the watchlist feed (Top panel +
+   * Finance page). Yahoo killed its general finance RSS in Oct 2026; the
+   * per-symbol headline feed is the surviving replacement.
+   */
+  yahooFinanceSymbols?: string[];
 }
 
 export interface AppConfig {
