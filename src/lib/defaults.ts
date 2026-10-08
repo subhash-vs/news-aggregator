@@ -242,8 +242,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         rss("Times of India Top", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
         rss("Hindustan Times India", "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml"),
         rss("Hindustan Times Business", "https://www.hindustantimes.com/feeds/rss/business/rssfeed.xml"),
-        rss("Indian Express", "https://indianexpress.com/feed/"),
-        rss("Indian Express Business", "https://indianexpress.com/section/business/feed/"),
+        rss("The Hindu Business", "https://www.thehindu.com/business/feeder/default.rss"),
         rss("Business Standard India", "https://www.business-standard.com/rss/india-news-102.rss"),
         rss("Business Standard Latest", "https://www.business-standard.com/rss/latest.rss"),
         rss("Mint Industry", "https://www.livemint.com/rss/industry"),
@@ -329,7 +328,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         rss("BBC Sport", "https://feeds.bbci.co.uk/sport/rss.xml"),
         rss("Guardian Sport", "https://www.theguardian.com/sport/rss"),
         rss("DW Sports", "https://rss.dw.com/rdf/rss-en-sports"),
-        rss("ESPN", "https://www.espn.com/espn/rss/news"),
+
         {
           id: "reddit-cricket",
           type: "reddit",

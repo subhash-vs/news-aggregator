@@ -19,7 +19,7 @@ export function publisherOf(source: string): string {
   if (s.includes("ars")) return "Ars Technica";
   if (s.includes("google news")) return "Google News";
   if (s.includes("reddit")) return "Reddit";
-  if (s.includes("espn")) return "ESPN";
+
   if (s.includes("reuters")) return "Reuters";
   if (s.includes("wsj") || s.includes("dow jones") || s.includes("dj markets")) {
     return "WSJ/DJ";

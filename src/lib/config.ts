@@ -30,6 +30,23 @@ function normalizeLatestWindowHours(value: unknown): number {
 const DEAD_YAHOO_RSSINDEX = "https://finance.yahoo.com/news/rssindex";
 const MANAGED_YAHOO_SOURCE_IDS = new Set(["rss-yahoo-finance", "rss-yahoo-finance-watchlist"]);
 
+/**
+ * Feed URLs that are permanently dead (IP-blocked or removed) and should be
+ * stripped from stored configs on load.
+ */
+const DEAD_FEED_URLS = new Set([
+  "https://indianexpress.com/feed/",
+  "https://indianexpress.com/section/business/feed/",
+  "https://www.espn.com/espn/rss/news",
+]);
+
+function migrateDeadSources(page: Page): Page {
+  const sources = page.sources.filter(
+    (s) => !(s.type === "rss" && s.config?.feedUrl && DEAD_FEED_URLS.has(s.config.feedUrl))
+  );
+  return sources.length === page.sources.length ? page : { ...page, sources };
+}
+
 function migrateDeadYahooSource(page: Page, symbols: string[]): Page {
   const watchlistUrl = yahooFeedUrl(symbols);
   if (!watchlistUrl) return page;
@@ -76,7 +93,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
   return {
     ...config,
     settings,
-    pages: config.pages.map((p) => migrateDeadYahooSource(p, symbols)),
+    pages: config.pages.map((p) => migrateDeadSources(migrateDeadYahooSource(p, symbols))),
   };
 }
 

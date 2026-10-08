@@ -122,7 +122,7 @@ async function downloadFeedXml(url: string): Promise<string | null> {
   try {
     const validator = getHttpValidator(url);
     const headers: Record<string, string> = {
-      "User-Agent": "news-aggregator/0.1 (personal news reader)",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
       Accept: "application/rss+xml, application/xml, text/xml, */*",
     };
     if (validator?.etag) headers["If-None-Match"] = validator.etag;

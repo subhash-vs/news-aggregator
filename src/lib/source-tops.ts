@@ -156,14 +156,7 @@ export const SOURCE_TOP_FEEDS: SourceTopFeed[] = [
     fidelity: "front-page",
     feedUrl: "https://www.thehindu.com/news/national/feeder/default.rss",
   },
-  {
-    id: "indian-express",
-    label: "Indian Express",
-    publisher: "Indian Express",
-    kind: "rss",
-    fidelity: "front-page",
-    feedUrl: "https://indianexpress.com/feed/",
-  },
+
   {
     id: "techcrunch",
     label: "TechCrunch",
