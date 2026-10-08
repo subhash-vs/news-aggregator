@@ -136,6 +136,75 @@ if (!articleCols.some((c) => c.name === "summary")) {
   db.exec("ALTER TABLE articles ADD COLUMN summary TEXT");
 }
 
+/* ------------------- Hoisted prepared statements (hot paths) -------------------
+ * node:sqlite re-parses SQL on every prepare() call. These statements run on
+ * every request and every feed fetch — preparing them once at module load
+ * instead of per call removes that per-call overhead from the hot loops.
+ */
+
+const stmtGetValidator = db.prepare(
+  "SELECT etag, last_modified FROM http_validators WHERE url = ?"
+);
+
+const stmtSaveValidator = db.prepare(`
+  INSERT INTO http_validators (url, etag, last_modified, updated_at)
+  VALUES ($url, $etag, $lastModified, datetime('now'))
+  ON CONFLICT(url) DO UPDATE SET
+    etag = excluded.etag,
+    last_modified = excluded.last_modified,
+    updated_at = excluded.updated_at
+`);
+
+const stmtTouchFetchedAt = db.prepare(
+  "UPDATE articles SET fetched_at = ? WHERE page = ? AND source = ?"
+);
+
+const stmtUpsertArticle = db.prepare(`
+  INSERT INTO articles (id, page, category, source, title, url, thumbnail, published_at, fetched_at, score, summary)
+  VALUES ($id, $page, $category, $source, $title, $url, $thumbnail, $publishedAt, $fetchedAt, $score, $summary)
+  ON CONFLICT(id) DO UPDATE SET
+    page = excluded.page,
+    category = excluded.category,
+    source = excluded.source,
+    title = excluded.title,
+    url = excluded.url,
+    thumbnail = excluded.thumbnail,
+    published_at = excluded.published_at,
+    fetched_at = excluded.fetched_at,
+    score = excluded.score,
+    summary = excluded.summary
+`);
+
+const stmtGetArticlesByPage = db.prepare(
+  `SELECT id, page, category, source, title, url, thumbnail, published_at as publishedAt, fetched_at as fetchedAt, score, summary
+   FROM articles WHERE page = ? ORDER BY published_at DESC`
+);
+
+const stmtNewestFetchedAt = db.prepare(
+  "SELECT MAX(fetched_at) AS newest FROM articles WHERE page = ?"
+);
+
+const stmtGlobalNewestFetchedAt = db.prepare(
+  "SELECT MAX(fetched_at) AS newest FROM articles"
+);
+
+const stmtPruneByAge = db.prepare(
+  `DELETE FROM articles
+   WHERE fetched_at IS NOT NULL
+     AND fetched_at < datetime('now', ?)`
+);
+
+const stmtDistinctPages = db.prepare("SELECT DISTINCT page FROM articles");
+
+const stmtPruneStalePerPage = db.prepare(
+  `DELETE FROM articles
+   WHERE page = ? AND id NOT IN (
+     SELECT id FROM articles WHERE page = ?
+     ORDER BY fetched_at DESC
+     LIMIT ?
+   )`
+);
+
 /* --------------------- HTTP conditional-request cache --------------------- */
 
 export interface HttpValidator {
@@ -144,22 +213,19 @@ export interface HttpValidator {
 }
 
 export function getHttpValidator(url: string): HttpValidator | null {
-  const row = db
-    .prepare("SELECT etag, last_modified FROM http_validators WHERE url = ?")
-    .get(url) as { etag: string | null; last_modified: string | null } | undefined;
+  const row = stmtGetValidator.get(url) as
+    | { etag: string | null; last_modified: string | null }
+    | undefined;
   if (!row) return null;
   return { etag: row.etag, lastModified: row.last_modified };
 }
 
 export function saveHttpValidator(url: string, validator: HttpValidator): void {
-  db.prepare(`
-    INSERT INTO http_validators (url, etag, last_modified, updated_at)
-    VALUES ($url, $etag, $lastModified, datetime('now'))
-    ON CONFLICT(url) DO UPDATE SET
-      etag = excluded.etag,
-      last_modified = excluded.last_modified,
-      updated_at = excluded.updated_at
-  `).run({ $url: url, $etag: validator.etag, $lastModified: validator.lastModified });
+  stmtSaveValidator.run({
+    $url: url,
+    $etag: validator.etag,
+    $lastModified: validator.lastModified,
+  });
 }
 
 /**
@@ -167,27 +233,11 @@ export function saveHttpValidator(url: string, validator: HttpValidator): void {
  * Used on HTTP 304 — the feed is unchanged, but its staleness clock resets.
  */
 export function touchArticlesFetchedAt(page: string, source: string): void {
-  db.prepare(
-    "UPDATE articles SET fetched_at = ? WHERE page = ? AND source = ?"
-  ).run(new Date().toISOString(), page, source);
+  stmtTouchFetchedAt.run(new Date().toISOString(), page, source);
 }
 
 export function upsertArticle(article: Article): void {
-  db.prepare(`
-    INSERT INTO articles (id, page, category, source, title, url, thumbnail, published_at, fetched_at, score, summary)
-    VALUES ($id, $page, $category, $source, $title, $url, $thumbnail, $publishedAt, $fetchedAt, $score, $summary)
-    ON CONFLICT(id) DO UPDATE SET
-      page = excluded.page,
-      category = excluded.category,
-      source = excluded.source,
-      title = excluded.title,
-      url = excluded.url,
-      thumbnail = excluded.thumbnail,
-      published_at = excluded.published_at,
-      fetched_at = excluded.fetched_at,
-      score = excluded.score,
-      summary = excluded.summary
-  `).run({
+  stmtUpsertArticle.run({
     $id: article.id,
     $page: article.page,
     $category: article.category ?? null,
@@ -203,13 +253,17 @@ export function upsertArticle(article: Article): void {
 }
 
 export function getArticlesByPage(page: string): Article[] {
-  const rows = db
-    .prepare(
-      `SELECT id, page, category, source, title, url, thumbnail, published_at as publishedAt, fetched_at as fetchedAt, score, summary
-       FROM articles WHERE page = ? ORDER BY published_at DESC`
-    )
-    .all(page) as unknown as Article[];
-  return rows;
+  return stmtGetArticlesByPage.all(page) as unknown as Article[];
+}
+
+export function getNewestFetchedAtRaw(page: string): string | null {
+  const row = stmtNewestFetchedAt.get(page) as { newest: string | null } | undefined;
+  return row?.newest ?? null;
+}
+
+export function getGlobalNewestFetchedAtRaw(): string | null {
+  const row = stmtGlobalNewestFetchedAt.get() as { newest: string | null } | undefined;
+  return row?.newest ?? null;
 }
 
 /**
@@ -220,28 +274,13 @@ export function pruneArticles(options?: { maxAgeDays?: number; maxPerPage?: numb
   const maxAgeDays = options?.maxAgeDays ?? 1;
   const maxPerPage = options?.maxPerPage ?? 200;
 
-  db.prepare(
-    `DELETE FROM articles
-     WHERE fetched_at IS NOT NULL
-       AND fetched_at < datetime('now', ?)`
-  ).run(`-${maxAgeDays} days`);
+  stmtPruneByAge.run(`-${maxAgeDays} days`);
 
-  const pages = db
-    .prepare("SELECT DISTINCT page FROM articles")
-    .all() as unknown as Array<{ page: string }>;
-
-  const deleteStale = db.prepare(
-    `DELETE FROM articles
-     WHERE page = ? AND id NOT IN (
-       SELECT id FROM articles WHERE page = ?
-       ORDER BY fetched_at DESC
-       LIMIT ?
-     )`
-  );
+  const pages = stmtDistinctPages.all() as unknown as Array<{ page: string }>;
 
   const run = db.transaction(() => {
     for (const { page } of pages) {
-      deleteStale.run(page, page, maxPerPage);
+      stmtPruneStalePerPage.run(page, page, maxPerPage);
     }
   });
   run();

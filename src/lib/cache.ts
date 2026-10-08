@@ -1,4 +1,4 @@
-import { db, getArticlesByPage, pruneArticles, upsertArticle } from "./db";
+import { db, getArticlesByPage, getGlobalNewestFetchedAtRaw, getNewestFetchedAtRaw, pruneArticles, upsertArticle } from "./db";
 import type { Article } from "@/types";
 
 const DEFAULT_MAX_AGE_MINUTES = 30;
@@ -25,8 +25,21 @@ export function upsertArticles(page: string, articles: Article[]): void {
   }
 }
 
+/**
+ * Prune throttle: the DELETE passes over the articles table are the most
+ * expensive writes we do, and there is no value in running them after every
+ * single fetch — the table is retention-bounded (24h) either way. Once per
+ * 10 minutes keeps the table from growing between prune windows while
+ * removing prune work from the fetch hot path.
+ */
+const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+let lastPruneAt = 0;
+
 /** Keep the articles table bounded after writing fresh fetch results. */
 export function pruneCache(): void {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = now;
   try {
     pruneArticles();
   } catch (error) {
@@ -36,14 +49,29 @@ export function pruneCache(): void {
 
 export function getNewestFetchedAt(page: string): number {
   try {
-    const row = db
-      .prepare("SELECT MAX(fetched_at) AS newest FROM articles WHERE page = ?")
-      .get(page) as { newest: string | null };
-    if (!row?.newest) return 0;
-    const t = Date.parse(row.newest);
+    const newest = getNewestFetchedAtRaw(page);
+    if (!newest) return 0;
+    const t = Date.parse(newest);
     return Number.isFinite(t) ? t : 0;
   } catch (error) {
     console.error(`[cache] Failed to read newest fetchedAt for ${page}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Newest fetched_at across ALL pages — one aggregate instead of N per-page
+ * reads. Used as a cache-key component for cross-page pipelines (Top/Latest)
+ * so any page's fresh fetch invalidates their cached responses.
+ */
+export function getGlobalNewestFetchedAt(): number {
+  try {
+    const newest = getGlobalNewestFetchedAtRaw();
+    if (!newest) return 0;
+    const t = Date.parse(newest);
+    return Number.isFinite(t) ? t : 0;
+  } catch (error) {
+    console.error("[cache] Failed to read global newest fetchedAt:", error);
     return 0;
   }
 }

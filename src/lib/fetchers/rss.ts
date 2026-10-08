@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import type { Article, FetchResult } from "@/types";
-import { getHttpValidator, saveHttpValidator, touchArticlesFetchedAt } from "@/lib/db";
+import { getHttpValidator, saveHttpValidator } from "@/lib/db";
 import { cleanText, decodeHtmlEntities } from "@/lib/html";
 
 type MediaNode = {
@@ -166,9 +166,8 @@ export async function fetchRSS(url: string, source: string, page: string): Promi
   try {
     const xml = await downloadFeedXml(url);
     if (xml === null) {
-      // 304 Not Modified — content is unchanged. Touch fetchedAt so the
-      // page's staleness clock resets without re-parsing anything.
-      touchArticlesFetchedAt(page, source);
+      // 304 Not Modified — content unchanged. The caller (fetchAndStore)
+      // resets the page's staleness clock; we return notModified so it can.
       return { articles: [], notModified: true };
     }
     // parseString is CPU-only (no network), so it can't hang like parseURL did.

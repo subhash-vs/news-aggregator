@@ -1,9 +1,11 @@
 import { dedupeArticles } from "./articles";
 import { excludeAds } from "./ads";
-import { getCachedArticles } from "./cache";
+import { getGlobalNewestFetchedAt, getCachedArticles } from "./cache";
 import { LATEST_WINDOW_HOURS, SPECIAL_PAGE_IDS } from "./constants";
 import { getEnabledPages } from "./config";
+import { onConfigRawChanged } from "./seed";
 import { excludeNonEnglish } from "./language";
+import { ResponseCache, timeBucket } from "./response-cache";
 import type { Article } from "@/types";
 
 export { LATEST_WINDOW_HOURS };
@@ -46,12 +48,25 @@ function pageIds(): string[] {
 }
 
 /**
+ * Response cache for the Latest pipeline — same cost profile as Top (every
+ * page's articles re-read, filtered, deduped, re-sorted per request).
+ */
+const latestCache = new ResponseCache<Article[]>(8);
+onConfigRawChanged(() => latestCache.clear());
+const LATEST_BUCKET_MS = 5 * 60 * 1000;
+
+/**
  * Newest-first stories from every enabled page, limited to a short window
  * (default: last 2 hours) based on publishedAt. Sports and cinema are omitted.
  */
 export function getLatestStories(options?: { hours?: number; limit?: number }): Article[] {
   const hours = options?.hours ?? LATEST_WINDOW_HOURS;
   const limit = options?.limit ?? DEFAULT_LIMIT;
+
+  const key = `latest|${hours}|${limit}|${getGlobalNewestFetchedAt()}|${timeBucket(LATEST_BUCKET_MS)}`;
+  const hit = latestCache.get(key);
+  if (hit) return hit;
+
   const cutoff = Date.now() - hours * 60 * 60 * 1000;
 
   const pooled: Article[] = [];
@@ -73,8 +88,10 @@ export function getLatestStories(options?: { hours?: number; limit?: number }): 
   const recent = pooled.filter((a) => !isSportsOrCinema(a));
 
   const cleaned = cleanFeedArticles(dedupeArticles(recent));
-  return cleaned
+  const result = cleaned
     .slice()
     .sort((a, b) => Date.parse(b.publishedAt || "") - Date.parse(a.publishedAt || ""))
     .slice(0, limit);
+  latestCache.set(key, result);
+  return result;
 }

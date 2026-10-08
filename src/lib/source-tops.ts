@@ -7,6 +7,33 @@ import { db } from "./db";
 import { excludeNonEnglish } from "./language";
 import type { Article } from "@/types";
 
+/* Hoisted prepared statements — see db.ts note; these run per publisher-feed
+ * refresh and per /api/top request. */
+const stmtUpsertSourceTop = db.prepare(`
+  INSERT INTO source_tops (feed_id, label, publisher, kind, fidelity, feed_url, page, articles_json, error, fetched_at)
+  VALUES ($id, $label, $publisher, $kind, $fidelity, $feedUrl, $page, $articles, $error, datetime('now'))
+  ON CONFLICT(feed_id) DO UPDATE SET
+    label = excluded.label,
+    publisher = excluded.publisher,
+    kind = excluded.kind,
+    fidelity = excluded.fidelity,
+    feed_url = excluded.feed_url,
+    page = excluded.page,
+    articles_json = excluded.articles_json,
+    error = excluded.error,
+    fetched_at = excluded.fetched_at
+`);
+
+const stmtTouchSourceTop = db.prepare(
+  "UPDATE source_tops SET fetched_at = datetime('now') WHERE feed_id = ?"
+);
+
+const stmtSelectAllSourceTops = db.prepare("SELECT * FROM source_tops");
+
+const stmtReadSourceTopArticles = db.prepare(
+  "SELECT articles_json FROM source_tops WHERE feed_id = ?"
+);
+
 function cleanFeedArticles(articles: Article[]): Article[] {
   return excludeAds(excludeNonEnglish(articles));
 }
@@ -214,20 +241,7 @@ function upsertSourceTopRow(
   articles: Article[],
   error: string | null
 ): void {
-  db.prepare(`
-    INSERT INTO source_tops (feed_id, label, publisher, kind, fidelity, feed_url, page, articles_json, error, fetched_at)
-    VALUES ($id, $label, $publisher, $kind, $fidelity, $feedUrl, $page, $articles, $error, datetime('now'))
-    ON CONFLICT(feed_id) DO UPDATE SET
-      label = excluded.label,
-      publisher = excluded.publisher,
-      kind = excluded.kind,
-      fidelity = excluded.fidelity,
-      feed_url = excluded.feed_url,
-      page = excluded.page,
-      articles_json = excluded.articles_json,
-      error = excluded.error,
-      fetched_at = excluded.fetched_at
-  `).run({
+  stmtUpsertSourceTop.run({
     $id: feed.id,
     $label: feed.label,
     $publisher: feed.publisher,
@@ -261,9 +275,7 @@ function refreshOne(feed: SourceTopFeed): Promise<void> {
       if (result.notModified) {
         // 304 — feed unchanged. Keep cached articles, reset the staleness clock.
         recordFeedSuccess(`sourcetop:${feed.id}`);
-        db.prepare("UPDATE source_tops SET fetched_at = datetime('now') WHERE feed_id = ?").run(
-          feed.id
-        );
+        stmtTouchSourceTop.run(feed.id);
         return;
       }
 
@@ -286,9 +298,7 @@ function refreshOne(feed: SourceTopFeed): Promise<void> {
 }
 
 function readCachedArticles(feedId: string): Article[] {
-  const row = db
-    .prepare("SELECT articles_json FROM source_tops WHERE feed_id = ?")
-    .get(feedId) as { articles_json: string } | undefined;
+  const row = stmtReadSourceTopArticles.get(feedId) as { articles_json: string } | undefined;
   if (!row) return [];
   try {
     const parsed = JSON.parse(row.articles_json) as Article[];
@@ -320,9 +330,7 @@ function scheduleStaleRefreshes(rows: Map<string, SourceTopRow>): void {
  * through the global fetch queue (max 3 concurrent, deduped, circuit-broken).
  */
 export function getCachedSourceTops(limitPerFeed = 6): SourceTopResult[] {
-  const rows = db
-    .prepare("SELECT * FROM source_tops")
-    .all() as unknown as SourceTopRow[];
+  const rows = stmtSelectAllSourceTops.all() as unknown as SourceTopRow[];
   const byId = new Map(rows.map((r) => [r.feed_id, r]));
 
   scheduleStaleRefreshes(byId);

@@ -12,6 +12,7 @@ import {
 } from "@/components/SourceFilterChips";
 import { useToast } from "@/components/Toast";
 import { LATEST_WINDOW_HOURS } from "@/lib/constants";
+import { useStoredFetch } from "@/lib/useStoredFetch";
 import { useBookmarkIds } from "@/lib/useBookmarkIds";
 
 interface LatestResponse {
@@ -36,10 +37,11 @@ function groupByPage(articles: Article[], pageLabels: Map<string, string>) {
 }
 
 export default function LatestPage() {
-  const [data, setData] = useState<LatestResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, reload } = useStoredFetch<LatestResponse>(
+    "/api/latest",
+    "newsflow-feed:latest"
+  );
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { bookmarkedIds, setBookmarked } = useBookmarkIds();
@@ -68,40 +70,19 @@ export default function LatestPage() {
     }
   }
 
-  const load = useCallback(async () => {
-    try {
-      // Omit hours — server applies the configured Latest window.
-      const res = await fetch("/api/latest");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as LatestResponse;
-      setData(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load latest stories");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    setLoading(true);
     try {
       const res = await fetch("/api/articles/refresh", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await load();
+      await reload();
       toast("Refreshed all pages");
     } catch {
       toast("Refresh failed");
-      setLoading(false);
+    } finally {
+      setRefreshing(false);
     }
-  }, [load, toast]);
+  }, [reload, toast]);
 
   const articles = useMemo(
     () => filterByPublishers(data?.articles ?? [], sourceFilter),
@@ -138,8 +119,7 @@ export default function LatestPage() {
           <button
             type="button"
             onClick={() => {
-              setLoading(true);
-              void load();
+              void reload();
             }}
             className="section-label bg-primary px-4 py-2 text-primary-foreground"
           >

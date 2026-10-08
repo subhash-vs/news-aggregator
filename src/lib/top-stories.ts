@@ -1,10 +1,12 @@
 import { dedupeArticles } from "./articles";
 import { excludeAds } from "./ads";
-import { getCachedArticles } from "./cache";
+import { getGlobalNewestFetchedAt, getCachedArticles } from "./cache";
 import { SPECIAL_PAGE_IDS } from "./constants";
 import { getEnabledPages, getMaxAgeHours, getSortMode } from "./config";
+import { onConfigRawChanged } from "./seed";
 import { excludeNonEnglish } from "./language";
 import { rankArticles } from "./rank";
+import { ResponseCache, timeBucket } from "./response-cache";
 import type { Article } from "@/types";
 
 function cleanFeedArticles(articles: Article[]): Article[] {
@@ -15,11 +17,25 @@ const TOP_PER_PAGE = 8;
 const MAX_TOP_TOTAL = 36;
 
 /**
+ * Response cache for the cross-page Top pipeline — it re-reads EVERY enabled
+ * page's articles and runs dedupe + rank twice per request. Keyed on the
+ * global newest fetchedAt (any page's fetch invalidates), the maxAge config,
+ * and a 5-min time bucket for age-filter drift.
+ */
+const topCache = new ResponseCache<Article[]>(8);
+onConfigRawChanged(() => topCache.clear());
+const TOP_BUCKET_MS = 5 * 60 * 1000;
+
+/**
  * Cross-page Top Stories: best-ranked articles from each enabled page,
  * using heat ranking (engagement + recency + source weight).
  */
 export function getTopStories(limitPerSourcePage = TOP_PER_PAGE): Article[] {
   const maxAgeHours = getMaxAgeHours();
+  const key = `top|${limitPerSourcePage}|${maxAgeHours}|${getGlobalNewestFetchedAt()}|${timeBucket(TOP_BUCKET_MS)}`;
+  const hit = topCache.get(key);
+  if (hit) return hit;
+
   const cutoff = maxAgeHours > 0 ? Date.now() - maxAgeHours * 60 * 60 * 1000 : 0;
 
   const pageIds = getEnabledPages()
@@ -44,7 +60,9 @@ export function getTopStories(limitPerSourcePage = TOP_PER_PAGE): Article[] {
   }
 
   // Global re-rank so heat scores are comparable across pages
-  return rankArticles(cleanFeedArticles(dedupeArticles(buckets)), "top").slice(0, MAX_TOP_TOTAL);
+  const result = rankArticles(cleanFeedArticles(dedupeArticles(buckets)), "top").slice(0, MAX_TOP_TOTAL);
+  topCache.set(key, result);
+  return result;
 }
 
 export function getTopStoriesByPage(pageId: string, limit = 10): Article[] {

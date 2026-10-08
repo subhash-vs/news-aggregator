@@ -1,6 +1,9 @@
 import { db } from "./db";
 import { DEFAULT_CONFIG } from "./defaults";
 
+/* Hoisted — see db.ts note. */
+const stmtGetConfig = db.prepare("SELECT value FROM config WHERE key = ?");
+
 /**
  * Raw config blob memo. The DB read is skipped entirely until a write
  * happens — saveConfigRaw invalidates via the same listener registry that
@@ -10,9 +13,7 @@ let rawMemo: string | null | undefined;
 
 export function getConfigRaw(): string | null {
   if (rawMemo !== undefined) return rawMemo;
-  const row = db.prepare("SELECT value FROM config WHERE key = ?").get("app_config") as
-    | { value: string }
-    | undefined;
+  const row = stmtGetConfig.get("app_config") as { value: string } | undefined;
   rawMemo = row?.value ?? null;
   return rawMemo;
 }

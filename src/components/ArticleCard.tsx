@@ -28,6 +28,7 @@ export function ArticleCard({
             src={article.thumbnail}
             alt=""
             loading="lazy"
+            decoding="async"
             onError={() => setImageFailed(true)}
             className="newsprint-image h-full w-full object-cover"
           />

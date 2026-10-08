@@ -52,6 +52,7 @@ export function LeadStory({
             <img
               src={article.thumbnail}
               alt=""
+              decoding="async"
               onError={() => setImageFailed(true)}
               className="newsprint-image h-full w-full object-cover"
             />

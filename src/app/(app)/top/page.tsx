@@ -11,6 +11,7 @@ import {
   filterByPublishers,
 } from "@/components/SourceFilterChips";
 import { useToast } from "@/components/Toast";
+import { useStoredFetch } from "@/lib/useStoredFetch";
 import { useBookmarkIds } from "@/lib/useBookmarkIds";
 
 interface SourceTopResult {
@@ -55,10 +56,11 @@ function groupByPage(articles: Article[], pageLabels: Map<string, string>) {
 }
 
 export default function TopStoriesPage() {
-  const [data, setData] = useState<TopResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, reload } = useStoredFetch<TopResponse>(
+    "/api/top?perPage=6",
+    "newsflow-feed:top"
+  );
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { bookmarkedIds, setBookmarked } = useBookmarkIds();
@@ -88,40 +90,19 @@ export default function TopStoriesPage() {
     }
   }
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/top?perPage=6");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as TopResponse;
-      setData(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load top stories");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Data fetch after network response only.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    setLoading(true);
     try {
       const res = await fetch("/api/articles/refresh", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await load();
+      await reload();
       toast("Refresh started — results appear as they arrive");
     } catch {
       toast("Refresh failed");
-      setLoading(false);
+    } finally {
+      setRefreshing(false);
     }
-  }, [load, toast]);
+  }, [reload, toast]);
 
   const rankedArticles = useMemo(
     () => filterByPublishers(data?.articles ?? [], sourceFilter),
@@ -158,8 +139,7 @@ export default function TopStoriesPage() {
           <button
             type="button"
             onClick={() => {
-              setLoading(true);
-              void load();
+              void reload();
             }}
             className="section-label bg-primary px-4 py-2 text-primary-foreground"
           >

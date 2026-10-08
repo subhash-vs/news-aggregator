@@ -1,4 +1,4 @@
-import { getCachedArticles, isCacheStale, pruneCache, upsertArticles } from "./cache";
+import { getCachedArticles, getNewestFetchedAt, pruneCache, upsertArticles, DEFAULT_MAX_AGE_MINUTES } from "./cache";
 import { SPECIAL_PAGE_IDS } from "./constants";
 import { getMaxAgeHours, getPageConfig, getSortMode } from "./config";
 import { excludeAds } from "./ads";
@@ -9,7 +9,10 @@ import { rankArticles } from "./rank";
 import { cleanText } from "@/lib/html";
 import { mapWithConcurrency } from "@/lib/http";
 import { categoryKeywordPatterns, textMatchesAnyKeyword } from "@/lib/keywords";
-import type { Article, ArticlesResponse, Category, SortMode, SourceStatus } from "@/types";
+import { onConfigRawChanged } from "./seed";
+import { touchArticlesFetchedAt } from "./db";
+import { ResponseCache, timeBucket } from "./response-cache";
+import type { Article, ArticlesResponse, Category, Page, SortMode, SourceStatus } from "@/types";
 
 /** Serve-time cleanup: drop Hindi headlines and ad/promo feed junk. */
 function cleanFeedArticles(articles: Article[]): Article[] {
@@ -216,6 +219,17 @@ async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
     pruneCache();
   }
 
+  // 304 Not Modified: no new articles, but the page's staleness clock must
+  // reset for EVERY fetcher type. fetchRSS used to do this itself; the
+  // Guardian path returned notModified without touching fetchedAt, so a
+  // Guardian-only page never looked fresh and re-polled forever. Doing it
+  // here (once, centrally) covers RSS, Guardian, and any future fetcher.
+  for (const { source, result } of results) {
+    if (result.notModified) {
+      touchArticlesFetchedAt(pageId, source.name);
+    }
+  }
+
   return results.map(({ source, result }) => ({
     id: source.id,
     name: source.name,
@@ -242,6 +256,34 @@ export function refreshPageInBackground(pageId: string): Promise<SourceStatus[]>
   return run.then(() => lastStatuses.get(pageId) ?? []);
 }
 
+/**
+ * In-process cache of the expensive serve-time pipeline (dedupe → categorize
+ * → age-filter → rank). Keyed on everything that changes its output: page,
+ * newest fetchedAt (any fetch/touch moves it), sort/maxAge config, enabled
+ * category ids, and a 5-min time bucket (age filters drift with the clock).
+ * The volatile fields (stale flag, generatedAt) are recomputed per request so
+ * a cached "fresh" response can never mask newly-stale data. Config saves
+ * drop the whole cache via onConfigRawChanged.
+ */
+const pipelineCache = new ResponseCache<{ articles: Article[]; categories: Category[] }>(32);
+onConfigRawChanged(() => pipelineCache.clear());
+
+const PIPELINE_BUCKET_MS = 5 * 60 * 1000;
+
+function pipelineKey(
+  pageId: string,
+  newest: number,
+  sortMode: SortMode,
+  maxAgeHours: number,
+  page: Page
+): string {
+  const catSig = page.categories
+    .filter((c) => c.enabled)
+    .map((c) => c.id)
+    .join(",");
+  return `${pageId}|${newest}|${sortMode}|${maxAgeHours}|${catSig}|${timeBucket(PIPELINE_BUCKET_MS)}`;
+}
+
 export async function getArticlesForPage(
   pageId: string,
   options?: { force?: boolean }
@@ -253,42 +295,68 @@ export async function getArticlesForPage(
     return emptyResponse(pageId, [], maxAgeHours, sortMode);
   }
 
-  const buildResponse = (
-    articles: Article[],
-    stale: boolean,
-    sourceStatus: SourceStatus[],
-    generatedAt?: string
-  ): ArticlesResponse => {
+  /** Expensive part: clean → dedupe → categorize → filter by age → rank. */
+  const buildPipeline = (
+    articles: Article[]
+  ): { articles: Article[]; categories: Category[] } => {
     const categories = page.categories.filter((c) => c.enabled);
     const withCategories = cleanFeedArticles(dedupeArticles(articles)).map((article) => ({
       ...article,
       category: article.category ?? matchCategory(article, categories),
     }));
     return {
-      page: pageId,
       articles: rankArticles(filterByAge(withCategories, maxAgeHours), sortMode),
       categories,
-      stale,
-      generatedAt: generatedAt ?? new Date().toISOString(),
-      refreshIntervalMinutes: page.refreshIntervalMinutes ?? 0,
-      maxAgeHours,
-      sortMode,
-      sourceStatus,
     };
   };
 
+  const buildResponse = (
+    pipeline: { articles: Article[]; categories: Category[] },
+    stale: boolean,
+    sourceStatus: SourceStatus[],
+    generatedAt?: string
+  ): ArticlesResponse => ({
+    page: pageId,
+    articles: pipeline.articles,
+    categories: pipeline.categories,
+    stale,
+    generatedAt: generatedAt ?? new Date().toISOString(),
+    refreshIntervalMinutes: page.refreshIntervalMinutes ?? 0,
+    maxAgeHours,
+    sortMode,
+    sourceStatus,
+  });
+
+  const newest = getNewestFetchedAt(pageId);
+  const key = pipelineKey(pageId, newest, sortMode, maxAgeHours, page);
+  const stale = !newest || Date.now() - newest > DEFAULT_MAX_AGE_MINUTES * 60 * 1000;
+
+  // Cache hit: skip the DB read + dedupe + rank entirely. stale/generatedAt
+  // are recomputed above so time passing can't serve a stale-fresh response.
+  if (!options?.force) {
+    const hit = pipelineCache.get(key);
+    if (hit) {
+      if (stale) void refreshPageInBackground(pageId).catch(() => {});
+      return buildResponse(hit, stale, [], new Date().toISOString());
+    }
+  }
+
   const cached = filterByAge(getCachedArticles(pageId), maxAgeHours);
-  const cacheFresh = cached.length > 0 && !isCacheStale(pageId);
+  const cacheFresh = cached.length > 0 && !stale;
 
   if (cacheFresh && !options?.force) {
-    return buildResponse(cached, false, [], cached[0]?.fetchedAt ?? undefined);
+    const pipeline = buildPipeline(cached);
+    pipelineCache.set(key, pipeline);
+    return buildResponse(pipeline, false, [], cached[0]?.fetchedAt ?? undefined);
   }
 
   // Stale-but-present: serve immediately and refresh through the queue in the
   // background. The client polls and picks up fresh data shortly.
   if (cached.length > 0 && !options?.force) {
     void refreshPageInBackground(pageId).catch(() => {});
-    return buildResponse(cached, true, [], cached[0]?.fetchedAt ?? undefined);
+    const pipeline = buildPipeline(cached);
+    pipelineCache.set(key, pipeline);
+    return buildResponse(pipeline, true, [], cached[0]?.fetchedAt ?? undefined);
   }
 
   // Cold start (empty cache) or explicit refresh: enqueue through the global
@@ -297,5 +365,11 @@ export async function getArticlesForPage(
   // HTTP layer still bounds every individual source fetch.
   const sourceStatus = await refreshPageInBackground(pageId);
   const fresh = filterByAge(getCachedArticles(pageId), maxAgeHours);
-  return buildResponse(fresh, sourceStatus.some((s) => !s.ok), sourceStatus);
+  const pipeline = buildPipeline(fresh);
+  // Populate the cache under the post-fetch key so the next read hits warm.
+  pipelineCache.set(
+    pipelineKey(pageId, getNewestFetchedAt(pageId), sortMode, maxAgeHours, page),
+    pipeline
+  );
+  return buildResponse(pipeline, sourceStatus.some((s) => !s.ok), sourceStatus);
 }
