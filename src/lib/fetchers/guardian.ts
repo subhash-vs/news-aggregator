@@ -1,6 +1,7 @@
 import type { Article, FetchResult } from "@/types";
 import { cleanText } from "@/lib/html";
 import { fetchWithTimeout } from "@/lib/http";
+import { getHttpValidator, saveHttpValidator } from "@/lib/db";
 
 const GUARDIAN_BASE = "https://content.guardianapis.com";
 
@@ -19,10 +20,27 @@ export async function fetchGuardian(section: string, page: string): Promise<Fetc
       "show-fields": "thumbnail",
       order: "newest",
     });
+    const requestUrl = `${GUARDIAN_BASE}/search?${params.toString()}`;
 
-    const res = await fetchWithTimeout(`${GUARDIAN_BASE}/search?${params.toString()}`);
+    // Conditional request: reuse stored validators so unchanged responses
+    // come back as 304 with no body to parse.
+    const validator = getHttpValidator(requestUrl);
+    const headers: Record<string, string> = {};
+    if (validator?.etag) headers["If-None-Match"] = validator.etag;
+    if (validator?.lastModified) headers["If-Modified-Since"] = validator.lastModified;
+
+    const res = await fetchWithTimeout(requestUrl, { headers });
+    if (res.status === 304) {
+      return { articles: [], notModified: true };
+    }
     if (!res.ok) {
       return { articles: [], error: `Guardian HTTP ${res.status}` };
+    }
+
+    const etag = res.headers.get("etag");
+    const lastModified = res.headers.get("last-modified");
+    if (etag || lastModified) {
+      saveHttpValidator(requestUrl, { etag, lastModified });
     }
 
     const data = (await res.json()) as {

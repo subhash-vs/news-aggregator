@@ -87,6 +87,8 @@ export type SourceConfig = GuardianConfig | HNConfig | RedditConfig | RSSConfig;
 export interface FetchResult {
   articles: Article[];
   error?: string;
+  /** True when the origin answered 304 — content unchanged since our last fetch. */
+  notModified?: boolean;
 }
 
 export interface SourceStatus {
@@ -95,6 +97,8 @@ export interface SourceStatus {
   type: SourceType;
   ok: boolean;
   count: number;
+  /** True when the origin answered 304 — feed unchanged, nothing re-fetched. */
+  notModified?: boolean;
   error?: string;
 }
 

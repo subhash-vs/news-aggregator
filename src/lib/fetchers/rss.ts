@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import type { Article, FetchResult } from "@/types";
+import { getHttpValidator, saveHttpValidator, touchArticlesFetchedAt } from "@/lib/db";
 import { cleanText, decodeHtmlEntities } from "@/lib/html";
 
 type MediaNode = {
@@ -110,20 +111,40 @@ function normalizeDate(value?: string | Date): string | null {
  * froze the whole 512MB VM into swap thrash. Fetching via AbortController
  * keeps the signal armed for the ENTIRE download (headers + body), so a
  * trickling server can't hold us hostage, and the body size is capped.
+ *
+ * Conditional requests: when we hold an ETag/Last-Modified for this feed we
+ * send it, and a 304 response means "nothing changed" — we skip the download
+ * body, the parse, and the article upserts entirely. Returns null on 304.
  */
-async function downloadFeedXml(url: string): Promise<string> {
+async function downloadFeedXml(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RSS_TIMEOUT_MS);
   try {
+    const validator = getHttpValidator(url);
+    const headers: Record<string, string> = {
+      "User-Agent": "news-aggregator/0.1 (personal news reader)",
+      Accept: "application/rss+xml, application/xml, text/xml, */*",
+    };
+    if (validator?.etag) headers["If-None-Match"] = validator.etag;
+    if (validator?.lastModified) headers["If-Modified-Since"] = validator.lastModified;
+
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        "User-Agent": "news-aggregator/0.1 (personal news reader)",
-        Accept: "application/rss+xml, application/xml, text/xml, */*",
-      },
+      headers,
     });
+
+    if (res.status === 304) {
+      return null; // Not modified — callers skip parse + upserts.
+    }
     if (!res.ok) {
       throw new Error(`RSS HTTP ${res.status}`);
+    }
+
+    // Server sent a full body — remember any validators it gave us.
+    const etag = res.headers.get("etag");
+    const lastModified = res.headers.get("last-modified");
+    if (etag || lastModified) {
+      saveHttpValidator(url, { etag, lastModified });
     }
 
     const declared = Number(res.headers.get("content-length") ?? 0);
@@ -144,6 +165,12 @@ async function downloadFeedXml(url: string): Promise<string> {
 export async function fetchRSS(url: string, source: string, page: string): Promise<FetchResult> {
   try {
     const xml = await downloadFeedXml(url);
+    if (xml === null) {
+      // 304 Not Modified — content is unchanged. Touch fetchedAt so the
+      // page's staleness clock resets without re-parsing anything.
+      touchArticlesFetchedAt(page, source);
+      return { articles: [], notModified: true };
+    }
     // parseString is CPU-only (no network), so it can't hang like parseURL did.
     const feed = await parser.parseString(xml);
 

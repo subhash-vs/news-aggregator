@@ -258,6 +258,15 @@ function refreshOne(feed: SourceTopFeed): Promise<void> {
           ? await fetchHN(20, feed.page ?? "technology")
           : await fetchRSS(feed.feedUrl!, feed.label, "top");
 
+      if (result.notModified) {
+        // 304 — feed unchanged. Keep cached articles, reset the staleness clock.
+        recordFeedSuccess(`sourcetop:${feed.id}`);
+        db.prepare("UPDATE source_tops SET fetched_at = datetime('now') WHERE feed_id = ?").run(
+          feed.id
+        );
+        return;
+      }
+
       const articles = cleanFeedArticles(dedupeArticles(result.articles)).slice(
         0,
         CACHE_ARTICLE_CAP

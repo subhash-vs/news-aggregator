@@ -204,6 +204,7 @@ async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
     if (result.error) {
       recordFeedFailure(`page:${pageId}:${source.id}`);
     } else {
+      // 304 Not Modified counts as success — the feed answered, it's just unchanged.
       recordFeedSuccess(`page:${pageId}:${source.id}`);
     }
     return { source, result };
@@ -221,6 +222,7 @@ async function fetchAndStore(pageId: string): Promise<SourceStatus[]> {
     type: source.type,
     ok: !result.error,
     count: result.articles.length,
+    notModified: result.notModified,
     error: result.error,
   }));
 }

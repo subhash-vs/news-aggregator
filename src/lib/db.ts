@@ -117,6 +117,13 @@ retryExec(`
     error TEXT,
     fetched_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS http_validators (
+    url TEXT PRIMARY KEY,
+    etag TEXT,
+    last_modified TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations for existing DBs
@@ -126,6 +133,42 @@ if (!articleCols.some((c) => c.name === "score")) {
 }
 if (!articleCols.some((c) => c.name === "summary")) {
   db.exec("ALTER TABLE articles ADD COLUMN summary TEXT");
+}
+
+/* --------------------- HTTP conditional-request cache --------------------- */
+
+export interface HttpValidator {
+  etag: string | null;
+  lastModified: string | null;
+}
+
+export function getHttpValidator(url: string): HttpValidator | null {
+  const row = db
+    .prepare("SELECT etag, last_modified FROM http_validators WHERE url = ?")
+    .get(url) as { etag: string | null; last_modified: string | null } | undefined;
+  if (!row) return null;
+  return { etag: row.etag, lastModified: row.last_modified };
+}
+
+export function saveHttpValidator(url: string, validator: HttpValidator): void {
+  db.prepare(`
+    INSERT INTO http_validators (url, etag, last_modified, updated_at)
+    VALUES ($url, $etag, $lastModified, datetime('now'))
+    ON CONFLICT(url) DO UPDATE SET
+      etag = excluded.etag,
+      last_modified = excluded.last_modified,
+      updated_at = excluded.updated_at
+  `).run({ $url: url, $etag: validator.etag, $lastModified: validator.lastModified });
+}
+
+/**
+ * Bump fetched_at for a source's articles without re-writing content.
+ * Used on HTTP 304 — the feed is unchanged, but its staleness clock resets.
+ */
+export function touchArticlesFetchedAt(page: string, source: string): void {
+  db.prepare(
+    "UPDATE articles SET fetched_at = ? WHERE page = ? AND source = ?"
+  ).run(new Date().toISOString(), page, source);
 }
 
 export function upsertArticle(article: Article): void {
