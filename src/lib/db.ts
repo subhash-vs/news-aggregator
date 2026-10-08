@@ -98,6 +98,7 @@ retryExec(`
 
   CREATE INDEX IF NOT EXISTS idx_articles_page ON articles(page);
   CREATE INDEX IF NOT EXISTS idx_articles_fetched ON articles(fetched_at);
+  CREATE INDEX IF NOT EXISTS idx_articles_page_fetched ON articles(page, fetched_at);
 
   CREATE TABLE IF NOT EXISTS bookmarks (
     id TEXT PRIMARY KEY,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getArticlesForPage, refreshPageInBackground } from "@/lib/articles";
 import { getEnabledPages } from "@/lib/config";
+import { articlesEtag } from "@/lib/etag";
 
 /**
  * Explicit refresh. Single-page refreshes await the queued, deduplicated job
@@ -31,7 +32,9 @@ export async function POST(request: Request) {
     }
 
     const data = await getArticlesForPage(page, { force: true });
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: { ETag: articlesEtag(data), "Cache-Control": "no-store" },
+    });
   } catch (error) {
     console.error("[api/articles/refresh] Failed:", error);
     return NextResponse.json({ error: "Refresh failed" }, { status: 500 });

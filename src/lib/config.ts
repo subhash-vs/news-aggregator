@@ -1,5 +1,5 @@
 import { DEFAULT_CONFIG } from "./defaults";
-import { getConfigRaw, saveConfigRaw } from "./seed";
+import { getConfigRaw, onConfigRawChanged, saveConfigRaw } from "./seed";
 import { LATEST_WINDOW_HOURS } from "./constants";
 import type { AppConfig, AppSettings, Category, DesignTheme, Page, Source } from "@/types";
 import { validateConfig } from "./validate";
@@ -35,7 +35,21 @@ function normalizeConfig(config: AppConfig): AppConfig {
   return { ...config, settings };
 }
 
+/**
+ * Parsed+validated config memo. getConfig() runs on every request path call
+ * (getEnabledPages, getPageConfig, getMaxAgeHours, getSortMode…) — without
+ * this, each call re-reads SQLite, re-parses the JSON blob, and re-validates
+ * ~100 sources. The memo is dropped the instant config is saved (listener in
+ * seed.ts), so settings changes are visible on the very next call.
+ */
+let configMemo: AppConfig | null = null;
+onConfigRawChanged(() => {
+  configMemo = null;
+});
+
 export function getConfig(): AppConfig {
+  if (configMemo) return configMemo;
+
   const raw = getConfigRaw();
   if (!raw) return cloneDefaults();
 
@@ -46,7 +60,8 @@ export function getConfig(): AppConfig {
       console.warn("[config] Stored config invalid; using defaults.");
       return cloneDefaults();
     }
-    return normalizeConfig(parsed);
+    configMemo = normalizeConfig(parsed);
+    return configMemo;
   } catch (error) {
     console.warn("[config] Failed to parse stored config; using defaults.", error);
     return cloneDefaults();

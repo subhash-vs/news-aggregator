@@ -56,18 +56,36 @@ export function NewsPage({
   const { toast } = useToast();
   const { bookmarkedIds, setBookmarked } = useBookmarkIds();
   const hasLoadedRef = useRef(false);
+  /** ETag of the last payload we received — sent back as If-None-Match. */
+  const etagRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Sync filter from sessionStorage (external system) when page changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSourceFilter(readSelected(pageId));
+    // Payloads are page-specific; a cross-page ETag would never match anyway,
+    // but clearing keeps the ref honest.
+    etagRef.current = null;
   }, [pageId]);
 
   const load = useCallback(
     async (force = false) => {
       try {
-        const res = await fetch(`/api/articles?page=${pageId}`);
+        const res = await fetch(`/api/articles?page=${pageId}`, {
+          headers:
+            !force && etagRef.current ? { "If-None-Match": etagRef.current } : undefined,
+        });
+        if (res.status === 304) {
+          // Payload unchanged — keep current data. Nudge the data reference so
+          // the stale-poll effect re-runs and schedules the next check;
+          // each poll now costs ~200 bytes instead of the full article set.
+          setData((prev) => (prev ? { ...prev } : prev));
+          setError(null);
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const newEtag = res.headers.get("etag");
+        if (newEtag) etagRef.current = newEtag;
         const json = (await res.json()) as ArticlesResponse;
         setData(json);
         setError(null);
@@ -96,6 +114,8 @@ export function NewsPage({
     try {
       const res = await fetch(`/api/articles/refresh?page=${pageId}`, { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const newEtag = res.headers.get("etag");
+      if (newEtag) etagRef.current = newEtag;
       const json = (await res.json()) as ArticlesResponse;
       setData(json);
       setError(null);
@@ -118,21 +138,22 @@ export function NewsPage({
   }, [load]);
 
   // Stale-while-revalidate client: when the server serves cached-but-stale
-  // articles, a background refresh is already running. Poll every ~8s (capped)
-  // until fresh data arrives instead of showing outdated news indefinitely.
+  // articles, a background refresh is already running. Poll every ~10s until
+  // fresh data arrives. Polls are cheap: unchanged payloads come back as
+  // ~200-byte 304s via If-None-Match, so the cap can be generous.
   const stalePollsRef = useRef(0);
   useEffect(() => {
     if (!data?.stale) {
       stalePollsRef.current = 0;
       return;
     }
-    if (stalePollsRef.current >= 8) return; // ~1 minute max of polling
+    if (stalePollsRef.current >= 18) return; // ~3 minutes max of polling
     stalePollsRef.current += 1;
     const timer = window.setTimeout(() => {
       if (document.visibilityState === "visible") {
         void load(false);
       }
-    }, 8_000);
+    }, 10_000);
     return () => window.clearTimeout(timer);
   }, [data, load]);
 

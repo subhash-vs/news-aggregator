@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { getArticlesForPage, refreshPageInBackground } from "@/lib/articles";
 import { getEnabledPages } from "@/lib/config";
+import { articlesEtag } from "@/lib/etag";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -24,7 +25,21 @@ export async function GET(request: Request) {
       after(() => refreshPageInBackground(page));
     }
 
-    return NextResponse.json(data);
+    // Conditional GET: the client's stale-poll sends If-None-Match; when our
+    // article set hasn't changed, an empty 304 replaces a ~200KB body. The
+    // background refresh above still runs — 304 only skips the transfer.
+    const etag = articlesEtag(data);
+    const ifNoneMatch = request.headers.get("if-none-match");
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, "Cache-Control": "no-store" },
+      });
+    }
+
+    return NextResponse.json(data, {
+      headers: { ETag: etag, "Cache-Control": "no-store" },
+    });
   } catch (error) {
     console.error("[api/articles] Failed:", error);
     return NextResponse.json({ error: "Failed to load articles" }, { status: 500 });

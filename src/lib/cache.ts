@@ -34,15 +34,24 @@ export function pruneCache(): void {
   }
 }
 
+export function getNewestFetchedAt(page: string): number {
+  try {
+    const row = db
+      .prepare("SELECT MAX(fetched_at) AS newest FROM articles WHERE page = ?")
+      .get(page) as { newest: string | null };
+    if (!row?.newest) return 0;
+    const t = Date.parse(row.newest);
+    return Number.isFinite(t) ? t : 0;
+  } catch (error) {
+    console.error(`[cache] Failed to read newest fetchedAt for ${page}:`, error);
+    return 0;
+  }
+}
+
 export function isCacheStale(page: string, maxAgeMinutes = DEFAULT_MAX_AGE_MINUTES): boolean {
-  const articles = getCachedArticles(page);
-  if (articles.length === 0) return true;
-
-  const newest = articles.reduce((max, article) => {
-    const t = article.fetchedAt ? Date.parse(article.fetchedAt) : 0;
-    return Number.isFinite(t) && t > max ? t : max;
-  }, 0);
-
+  // Single aggregate over the (page, fetched_at) index instead of loading
+  // every article row just to find the max timestamp.
+  const newest = getNewestFetchedAt(page);
   if (!newest) return true;
   return Date.now() - newest > maxAgeMinutes * 60 * 1000;
 }

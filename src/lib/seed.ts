@@ -1,21 +1,44 @@
 import { db } from "./db";
 import { DEFAULT_CONFIG } from "./defaults";
 
+/**
+ * Raw config blob memo. The DB read is skipped entirely until a write
+ * happens — saveConfigRaw invalidates via the same listener registry that
+ * config.ts uses, so every reader sees fresh data immediately after a save.
+ */
+let rawMemo: string | null | undefined;
+
 export function getConfigRaw(): string | null {
+  if (rawMemo !== undefined) return rawMemo;
   const row = db.prepare("SELECT value FROM config WHERE key = ?").get("app_config") as
     | { value: string }
     | undefined;
-  return row?.value ?? null;
+  rawMemo = row?.value ?? null;
+  return rawMemo;
+}
+
+/* Notified whenever app_config is written — lets config.ts drop its memo. */
+const rawChangeListeners = new Set<() => void>();
+
+export function onConfigRawChanged(listener: () => void): void {
+  rawChangeListeners.add(listener);
 }
 
 export function saveConfigRaw(json: string): void {
-  db.prepare(`
-    INSERT INTO config (key, value, updated_at)
-    VALUES ('app_config', @value, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET
-      value = excluded.value,
-      updated_at = datetime('now')
-  `).run({ value: json });
+  try {
+    db.prepare(`
+      INSERT INTO config (key, value, updated_at)
+      VALUES ('app_config', @value, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = datetime('now')
+    `).run({ value: json });
+  } finally {
+    // Invalidate even on write failure so we never serve a memo that
+    // diverges from what's actually in the database.
+    rawMemo = undefined;
+    for (const listener of rawChangeListeners) listener();
+  }
 }
 
 export function seed(): void {
