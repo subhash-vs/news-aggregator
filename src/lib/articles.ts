@@ -27,6 +27,15 @@ function urlQuality(article: Article): number {
   return 2;
 }
 
+/** Most recent of two ISO timestamps (either may be null/invalid). */
+function newerIso(a?: string | null, b?: string | null): string | null {
+  const at = a ? Date.parse(a) : NaN;
+  const bt = b ? Date.parse(b) : NaN;
+  if (!Number.isFinite(at)) return b ?? null;
+  if (!Number.isFinite(bt)) return a ?? null;
+  return at >= bt ? a! : b!;
+}
+
 function mergeArticles(a: Article, b: Article): Article {
   const [primary, secondary] = urlQuality(a) >= urlQuality(b) ? [a, b] : [b, a];
   const sources = new Set(
@@ -42,10 +51,24 @@ function mergeArticles(a: Article, b: Article): Article {
     thumbnail: primary.thumbnail || secondary.thumbnail,
     summary: primary.summary || secondary.summary || null,
     score: Math.max(primary.score ?? 0, secondary.score ?? 0) || null,
-    publishedAt: primary.publishedAt || secondary.publishedAt,
+    // Take the newer timestamp so an evergreen re-tease merge (below) shows
+    // the latest revision regardless of which variant arrived first.
+    publishedAt: newerIso(primary.publishedAt, secondary.publishedAt),
     source: [...sources].join(" · "),
   };
 }
+
+/**
+ * Evergreen pages that republish under a rotating headline. The Economist's
+ * "World in Brief" is the archetype: one page, re-teased throughout the day
+ * ("World in Brief: <lead brief>; <rotating brief>"), and Google News
+ * indexes each re-tease as a separate article with its own URL. Both dedupe
+ * passes then see N distinct articles (distinct URLs, distinct full titles),
+ * so the story shows up on the page once per live revision. Keying on the
+ * fixed series prefix collapses them into a single card. Add entries as
+ * other rotating evergreen feeds appear.
+ */
+const EVERGREEN_SERIES = new Set(["world in brief"]);
 
 /**
  * Normalize a title for cross-source matching:
@@ -59,6 +82,15 @@ function titleKey(article: Article): string {
 
   // Drop common wire/live prefixes noise
   t = t.replace(/^(live updates?|breaking|update)s?:\s*/i, "");
+
+  // Rotating evergreen series: the text before the series colon is the real
+  // identity; everything after it is today's tease. Checked before punctuation
+  // stripping because the colon is what delimits the series name.
+  const series = /^([a-z0-9\s'’]{3,40}):/.exec(t)?.[1]?.trim() ?? "";
+  if (EVERGREEN_SERIES.has(series)) {
+    // The series key is short by construction — skip the length guard below.
+    return series;
+  }
 
   t = t
     .replace(/[^a-z0-9\s]/g, " ")
