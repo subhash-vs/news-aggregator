@@ -51,7 +51,7 @@
 | Styling | Tailwind v4 + Lucide | Matches portfolio-tracker |
 | Database | SQLite (better-sqlite3) | Zero config, local, fast |
 | RSS | `rss-parser` npm package | Mature, handles edge cases |
-| Hosting | Vercel / Railway | Free tier, zero ops |
+| Hosting | Vercel | Free tier, zero ops |
 
 ---
 

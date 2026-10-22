@@ -129,7 +129,7 @@ Staying informed requires visiting multiple sites (TechCrunch, The Guardian, Red
 - No crashes on malformed RSS
 
 ### 9.3 Hosting
-- Vercel or Railway free tier
+- Vercel free tier
 - SQLite for config and article cache
 - No external database service
 
