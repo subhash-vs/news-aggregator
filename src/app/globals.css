@@ -155,9 +155,16 @@ body {
   color: var(--foreground);
 }
 
-:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+/* Site-wide keyboard focus ring. In @layer base so Tailwind utilities
+   (utilities layer) can opt individual controls out — e.g. the search
+   input's focus:outline-none. Unlayered, this rule beat every layered
+   utility regardless of specificity and painted a full ring around
+   focused inputs. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 
 /* ---- Utilities ---- */

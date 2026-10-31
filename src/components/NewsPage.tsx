@@ -292,22 +292,10 @@ export function NewsPage({
       ) : null}
 
       {data && articles.length > 0 && filteredArticles.length === 0 && !loading ? (
-        searchMiss ? (
-          <div className="flex flex-col items-center gap-3 border border-border bg-card px-6 py-12 text-center">
-            <h2 className="font-display text-xl font-bold">No matching titles</h2>
-            <p className="max-w-md font-serif text-sm leading-[1.65] text-muted-foreground">
-              Nothing in this page&apos;s headlines matches “{searchQuery.trim()}”. Try fewer
-              words, or clear the search.
-            </p>
-            <button
-              type="button"
-              onClick={() => setSearchQuery("")}
-              className="section-label border border-border px-4 py-2 text-foreground transition-colors hover:border-accent hover:text-accent"
-            >
-              Clear search
-            </button>
-          </div>
-        ) : (
+        // A zero-match search reports itself through the count line under
+        // the search input ("No titles match “q”") — only the source filter
+        // needs its own recovery box with a clear action.
+        searchMiss ? null : (
           <div className="flex flex-col items-center gap-3 border border-border bg-card px-6 py-12 text-center">
             <h2 className="font-display text-xl font-bold">No stories from selected sources</h2>
             <p className="max-w-md font-serif text-sm text-muted-foreground">

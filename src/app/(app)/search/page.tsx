@@ -134,14 +134,8 @@ function SearchView() {
 
       {pending ? <LoadingGrid count={6} /> : null}
 
-      {trimmed && !error && valid && valid.articles.length === 0 ? (
-        <div className="border border-border bg-card px-6 py-14 text-center">
-          <h2 className="font-display text-xl font-bold">No headlines match</h2>
-          <p className="mx-auto mt-2 max-w-md font-serif text-sm leading-[1.65] text-muted-foreground">
-            Nothing cached matches “{trimmed}”. Try fewer or different words.
-          </p>
-        </div>
-      ) : null}
+      {/* Zero matches: the count line under the input already reads
+          "No titles match “q”" — a second box repeating it was noise. */}
 
       {!error && valid && valid.articles.length > 0 ? (
         <>
