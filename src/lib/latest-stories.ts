@@ -72,9 +72,10 @@ export function getLatestStories(options?: { hours?: number; limit?: number }): 
   const pooled: Article[] = [];
   for (const pageId of pageIds()) {
     const cached = getCachedArticles(pageId);
-    // Keep only the most recent articles per page so high-volume feeds (e.g. India)
-    // don't dominate the Latest stream.
-    const recentFromPage = cached
+    // Drop junk (ads, coupon roundups, non-English) BEFORE the cap so promo
+    // floods can't crowd real stories out of a page's allotment. The cap then
+    // keeps high-volume feeds (e.g. India) from dominating the Latest stream.
+    const recentFromPage = cleanFeedArticles(cached)
       .filter((a) => {
         if (!a.publishedAt) return false;
         const t = Date.parse(a.publishedAt);
