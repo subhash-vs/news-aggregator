@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Search } from "lucide-react";
 import { Nav } from "@/components/Nav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DesignThemeToggle, DesignThemeBridge } from "@/components/DesignTheme";
@@ -30,6 +31,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden shrink-0 sm:inline">World Edition</span>
             <span className="flex shrink-0 items-center gap-2">
               <span className="hidden sm:inline">Vol. I · No. 1</span>
+              <Link
+                href="/search"
+                aria-label="Search all titles"
+                title="Search"
+                className="section-label inline-flex h-9 w-9 items-center justify-center border border-border bg-card text-foreground transition-colors hover:text-accent"
+              >
+                <Search className="h-4 w-4" aria-hidden />
+              </Link>
               <DesignThemeToggle />
               <ThemeToggle />
             </span>

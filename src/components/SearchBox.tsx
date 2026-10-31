@@ -99,7 +99,9 @@ export function SearchBox({
         <p className="meta-line mt-1.5" role="status" aria-live="polite">
           {matchCount === 0
             ? `No titles match “${text.trim()}”`
-            : `${matchCount} of ${totalCount ?? matchCount} title${matchCount === 1 ? "" : "s"} match “${text.trim()}”`}
+            : totalCount === undefined
+              ? `${matchCount} title${matchCount === 1 ? "" : "s"} match “${text.trim()}”`
+              : `${matchCount} of ${totalCount} title${matchCount === 1 ? "" : "s"} match “${text.trim()}”`}
         </p>
       ) : null}
     </div>

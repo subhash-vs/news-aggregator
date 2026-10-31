@@ -120,6 +120,18 @@ export interface ArticlesResponse {
   sourceStatus: SourceStatus[];
 }
 
+/** Response for GET /api/search — global (cross-page) title search. */
+export interface SearchResponse {
+  /** Echo of the query that produced these results (used to detect staleness). */
+  query: string;
+  /** Top matches, ranked and capped at `limit`. */
+  articles: Article[];
+  /** Total matches before the limit was applied. */
+  total: number;
+  limit: number;
+  generatedAt: string;
+}
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
