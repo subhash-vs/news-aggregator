@@ -2,6 +2,7 @@
 
 import type { Article } from "@/types";
 import { BookmarkButton } from "@/components/BookmarkButton";
+import { Highlight } from "@/components/Highlight";
 import { timeAgo } from "@/lib/time";
 import { useState } from "react";
 
@@ -10,11 +11,14 @@ export function ArticleCard({
   bookmarked,
   onBookmarkChange,
   showBookmark = true,
+  highlight,
 }: {
   article: Article;
   bookmarked?: boolean;
   onBookmarkChange?: (id: string, bookmarked: boolean) => void;
   showBookmark?: boolean;
+  /** Search tokens to <mark> inside the title (from tokenize()). */
+  highlight?: string[];
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = !!article.thumbnail && !imageFailed;
@@ -59,7 +63,7 @@ export function ArticleCard({
             rel="noopener noreferrer"
             className="headline-link"
           >
-            {article.title}
+            <Highlight text={article.title} tokens={highlight ?? []} />
           </a>
         </h3>
 

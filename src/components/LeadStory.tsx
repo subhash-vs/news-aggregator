@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Article } from "@/types";
 import { BookmarkButton } from "@/components/BookmarkButton";
+import { Highlight } from "@/components/Highlight";
 import { timeAgo } from "@/lib/time";
 
 /**
@@ -14,11 +15,14 @@ export function LeadStory({
   bookmarked,
   onBookmarkChange,
   label = "Lead story",
+  highlight,
 }: {
   article: Article;
   bookmarked?: boolean;
   onBookmarkChange?: (id: string, bookmarked: boolean) => void;
   label?: string;
+  /** Search tokens to <mark> inside the headline. */
+  highlight?: string[];
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = !!article.thumbnail && !imageFailed;
@@ -39,7 +43,7 @@ export function LeadStory({
           rel="noopener noreferrer"
           className="headline-link"
         >
-          {article.title}
+          <Highlight text={article.title} tokens={highlight ?? []} />
         </a>
       </h2>
 

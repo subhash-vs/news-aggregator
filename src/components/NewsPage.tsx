@@ -11,8 +11,10 @@ import {
   SourceFilterChips,
   filterByPublishers,
 } from "@/components/SourceFilterChips";
+import { SearchBox } from "@/components/SearchBox";
 import { useToast } from "@/components/Toast";
 import { pickLeadStory } from "@/lib/rank";
+import { filterBySearch, tokenize } from "@/lib/search";
 import { useBookmarkIds } from "@/lib/useBookmarkIds";
 
 function storageKey(pageId: string): string {
@@ -53,6 +55,7 @@ export function NewsPage({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<Set<string>>(() => new Set());
+  const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const { bookmarkedIds, setBookmarked } = useBookmarkIds();
   const hasLoadedRef = useRef(false);
@@ -63,6 +66,9 @@ export function NewsPage({
     // Sync filter from sessionStorage (external system) when page changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSourceFilter(readSelected(pageId));
+    // Search is ephemeral: a forgotten query must never look like a broken
+    // page after navigating away.
+    setSearchQuery("");
     // Payloads are page-specific; a cross-page ETag would never match anyway,
     // but clearing keeps the ref honest.
     etagRef.current = null;
@@ -184,10 +190,22 @@ export function NewsPage({
     return `Some sources unavailable (${failedSources.map((s) => s.name).join(", ")}). Showing what we have.`;
   }, [failedSources]);
 
-  const filteredArticles = useMemo(
-    () => filterByPublishers(articles, sourceFilter),
-    [articles, sourceFilter]
+  const searchActive = searchQuery.trim().length > 0;
+  const searchTokens = useMemo(() => tokenize(searchQuery), [searchQuery]);
+
+  // Title search first, then publisher chips — both must pass. Kept as two
+  // steps so the match count reflects the query alone and the empty state
+  // can tell which filter emptied the list.
+  const searchMatches = useMemo(
+    () => filterBySearch(articles, searchQuery),
+    [articles, searchQuery]
   );
+  const filteredArticles = useMemo(
+    () => filterByPublishers(searchMatches, sourceFilter),
+    [searchMatches, sourceFilter]
+  );
+  /** The query itself matched nothing (source chips may also be active). */
+  const searchMiss = searchActive && searchMatches.length === 0;
 
   const { lead, rest } = useMemo(() => {
     if (filteredArticles.length === 0) {
@@ -274,34 +292,60 @@ export function NewsPage({
       ) : null}
 
       {data && articles.length > 0 && filteredArticles.length === 0 && !loading ? (
-        <div className="flex flex-col items-center gap-3 border border-border bg-card px-6 py-12 text-center">
-          <h2 className="font-display text-xl font-bold">No stories from selected sources</h2>
-          <p className="max-w-md font-serif text-sm text-muted-foreground">
-            Try different source chips, or clear the filter to see everything.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              const next = new Set<string>();
-              setSourceFilter(next);
-              writeSelected(pageId, next);
-            }}
-            className="section-label border border-border px-4 py-2 text-foreground hover:border-accent hover:text-accent"
-          >
-            Clear source filter
-          </button>
-        </div>
+        searchMiss ? (
+          <div className="flex flex-col items-center gap-3 border border-border bg-card px-6 py-12 text-center">
+            <h2 className="font-display text-xl font-bold">No matching titles</h2>
+            <p className="max-w-md font-serif text-sm leading-[1.65] text-muted-foreground">
+              Nothing in this page&apos;s headlines matches “{searchQuery.trim()}”. Try fewer
+              words, or clear the search.
+            </p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="section-label border border-border px-4 py-2 text-foreground transition-colors hover:border-accent hover:text-accent"
+            >
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 border border-border bg-card px-6 py-12 text-center">
+            <h2 className="font-display text-xl font-bold">No stories from selected sources</h2>
+            <p className="max-w-md font-serif text-sm text-muted-foreground">
+              Try different source chips, or clear the filter to see everything.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const next = new Set<string>();
+                setSourceFilter(next);
+                writeSelected(pageId, next);
+              }}
+              className="section-label border border-border px-4 py-2 text-foreground hover:border-accent hover:text-accent"
+            >
+              Clear source filter
+            </button>
+          </div>
+        )
       ) : null}
 
       {data && articles.length > 0 ? (
-        <SourceFilterChips
-          articles={articles}
-          selected={sourceFilter}
-          onChange={(next) => {
-            setSourceFilter(next);
-            writeSelected(pageId, next);
-          }}
-        />
+        <>
+          <SearchBox
+            value={searchQuery}
+            onChange={setSearchQuery}
+            matchCount={searchMatches.length}
+            totalCount={articles.length}
+          />
+
+          <SourceFilterChips
+            articles={articles}
+            selected={sourceFilter}
+            onChange={(next) => {
+              setSourceFilter(next);
+              writeSelected(pageId, next);
+            }}
+          />
+        </>
       ) : null}
 
       {data && lead ? (
@@ -309,6 +353,7 @@ export function NewsPage({
           article={lead}
           bookmarked={bookmarkedIds.has(lead.id)}
           onBookmarkChange={setBookmarked}
+          highlight={searchTokens}
           label={pageId === "world" ? "Front page" : "Lead story"}
         />
       ) : null}
@@ -326,6 +371,7 @@ export function NewsPage({
                 articles={group.articles}
                 bookmarkedIds={bookmarkedIds}
                 onBookmarkChange={setBookmarked}
+                highlight={searchTokens}
               />
             </section>
           ))

@@ -9,10 +9,13 @@ export function ArticleGrid({
   articles,
   bookmarkedIds,
   onBookmarkChange,
+  highlight,
 }: {
   articles: Article[];
   bookmarkedIds?: Set<string>;
   onBookmarkChange?: (id: string, bookmarked: boolean) => void;
+  /** Search tokens to <mark> inside card titles. */
+  highlight?: string[];
 }) {
   return (
     <div className="grid grid-cards grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -22,6 +25,7 @@ export function ArticleGrid({
           article={article}
           bookmarked={bookmarkedIds?.has(article.id)}
           onBookmarkChange={onBookmarkChange}
+          highlight={highlight}
         />
       ))}
     </div>
